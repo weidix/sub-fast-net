@@ -82,9 +82,10 @@ pub enum ModelVariant {
     Base,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ProfilingAblation {
+    #[default]
     Normal,
     ForwardOnly,
     ForwardLossOnly,
@@ -99,12 +100,6 @@ pub enum ProfilingAblation {
     KernelOnly,
     DummyScalarBackward,
     HeadOnlyBackward,
-}
-
-impl Default for ProfilingAblation {
-    fn default() -> Self {
-        Self::Normal
-    }
 }
 
 impl Default for TrainConfig {

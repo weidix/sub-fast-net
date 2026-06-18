@@ -371,6 +371,7 @@ pub fn train_backend<B: burn::tensor::backend::AutodiffBackend>(
                     writeln!(profile_file, "{}", serde_json::to_string(&profile)?)?;
                     profiler.push(profile);
                 }
+                sync_training_device::<B>(&device, "after train step")?;
                 continue;
             }
             let (output, forward_cpu_time, forward_gpu_time) = profile_section(
@@ -444,6 +445,7 @@ pub fn train_backend<B: burn::tensor::backend::AutodiffBackend>(
                         step + 1,
                         loss_scaler.scale()
                     );
+                    sync_training_device::<B>(&device, "after non-finite loss skip")?;
                     continue;
                 }
                 let (grads, cpu_time, gpu_time) =
@@ -466,6 +468,7 @@ pub fn train_backend<B: burn::tensor::backend::AutodiffBackend>(
                         step + 1,
                         loss_scaler.scale()
                     );
+                    sync_training_device::<B>(&device, "after non-finite grad skip")?;
                     continue;
                 }
                 if needs_optimizer {
@@ -539,6 +542,7 @@ pub fn train_backend<B: burn::tensor::backend::AutodiffBackend>(
                 writeln!(profile_file, "{}", serde_json::to_string(&profile)?)?;
                 profiler.push(profile);
             }
+            sync_training_device::<B>(&device, "after train step")?;
         }
         drop(batch_receiver);
         let worker_result = join_prefetch_worker(prefetch_worker);
@@ -547,8 +551,10 @@ pub fn train_backend<B: burn::tensor::backend::AutodiffBackend>(
             return Err(err);
         }
         worker_result?;
+        sync_training_device::<B>(&device, "after train epoch")?;
         if epoch % config.validation_interval.max(1) == 0 {
             let validation = validate_model(config, &val_dataset, &model.clone().valid())?;
+            sync_training_device::<B>(&device, "after validation")?;
             writeln!(
                 metrics_file,
                 "{}",
@@ -598,6 +604,7 @@ pub fn train_backend<B: burn::tensor::backend::AutodiffBackend>(
             println!("checkpoint=periodic epoch={epoch} step={step}");
         }
     }
+    sync_training_device::<B>(&device, "before final checkpoint")?;
     tui.finish();
     save_training_checkpoint(
         Path::new(&config.output_dir).join("final"),
@@ -612,7 +619,9 @@ pub fn train_backend<B: burn::tensor::backend::AutodiffBackend>(
             scheduler_epoch: config.epochs,
         },
     )?;
+    sync_training_device::<B>(&device, "after final checkpoint")?;
     write_error_reports(config, &val_dataset, &model.clone().valid())?;
+    sync_training_device::<B>(&device, "after error reports")?;
     let final_model_artifact_size_bytes =
         model_artifact_size_bytes(Path::new(&config.output_dir).join("final"))?;
     let model_size_target_min_bytes = 1_000_000;
@@ -642,6 +651,11 @@ pub fn train_backend<B: burn::tensor::backend::AutodiffBackend>(
         print_profile_average(&average);
     }
     Ok(summary)
+}
+
+fn sync_training_device<B: AutodiffBackend>(device: &B::Device, stage: &'static str) -> Result<()> {
+    B::sync(device).with_context(|| format!("failed to synchronize training device {stage}"))?;
+    Ok(())
 }
 
 #[derive(Debug, Clone)]

@@ -6,7 +6,7 @@ edition = "2024"
 [features]
 default = ["backend-cpu", "backend-wgpu"]
 backend-cpu = ["burn/cpu"]
-backend-cuda = ["burn/cuda", "burn/autotune"]
+backend-cuda = ["burn/cuda"]
 backend-wgpu = ["burn/wgpu"]
 
 [dependencies]
