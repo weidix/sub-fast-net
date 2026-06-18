@@ -9,7 +9,7 @@ annotations.jsonl
 label_masks.json
 ```
 
-`train_roots` supports multiple roots. `val_root` is a single root. The default `configs/train.toml` does not cap training samples, so all configured training roots participate in full training. Smoke limits belong in `configs/smoke.toml`.
+`train_roots` supports multiple roots. `val_root` is a single root. The default `configs/train_wgpu.toml` does not cap training samples, so all configured training roots participate in full training. Smoke limits belong in `configs/smoke.toml`.
 
 If `max_train_samples` is configured for a smoke or debug run, samples are selected by round-robin across roots instead of truncating the globally sorted list, so a small cap does not silently use only root 0.
 
@@ -46,7 +46,7 @@ Annotations are read as metadata and validation hints. They validate image size 
 ## Inspection
 
 ```bash
-cargo run --release -- inspect-dataset --config configs/train.toml
+cargo run --release -- inspect-dataset --config configs/train_wgpu.toml
 ```
 
 The report includes sample counts, empty/invalid labels, deleted/corrected/added masks, ignore regions, dropped images, image-size distribution, bbox-size distribution, subtitle-position distribution, and abnormal samples.

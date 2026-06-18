@@ -35,7 +35,7 @@ The benchmark runs multiple validation samples, capped by `max_val_samples` when
 Run:
 
 ```bash
-cargo run --release -- benchmark --config configs/train.toml --checkpoint outputs/subfastnet_tiny/best
+cargo run --release -- benchmark --config configs/train_wgpu.toml --checkpoint outputs/subfastnet_tiny_wgpu/best
 ```
 
 Outputs are written to the DESIGN-standard files:

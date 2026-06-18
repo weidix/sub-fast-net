@@ -5,11 +5,11 @@ SubFastNet is a Rust/Burn subtitle region detector. It detects subtitle boxes in
 ## Commands
 
 ```bash
-cargo run --release -- inspect-dataset --config configs/train.toml
-cargo run --release -- train --config configs/train.toml
-cargo run --release -- validate --config configs/train.toml --checkpoint outputs/subfastnet_tiny/best
-cargo run --release -- infer --config configs/train.toml --checkpoint outputs/subfastnet_tiny/best --image sample.jpg
-cargo run --release -- benchmark --config configs/train.toml --checkpoint outputs/subfastnet_tiny/best
+cargo run --release -- inspect-dataset --config configs/train_wgpu.toml
+cargo run --release -- train --config configs/train_wgpu.toml
+cargo run --release -- validate --config configs/train_wgpu.toml --checkpoint outputs/subfastnet_tiny_wgpu/best
+cargo run --release -- infer --config configs/train_wgpu.toml --checkpoint outputs/subfastnet_tiny_wgpu/best --image sample.jpg
+cargo run --release -- benchmark --config configs/train_wgpu.toml --checkpoint outputs/subfastnet_tiny_wgpu/best
 ```
 
 For a short CPU verification run:
@@ -17,6 +17,8 @@ For a short CPU verification run:
 ```bash
 cargo run --release -- train --config configs/smoke.toml
 ```
+
+The CUDA/BF16 training configuration is `configs/train_cuda.toml`.
 
 ## Project Shape
 
