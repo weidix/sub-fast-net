@@ -1,7 +1,9 @@
 use serde::Serialize;
 
 use burn::tensor::{
-    Bool, BoolStore, DType, FloatDType, Tensor, TensorData, activation::sigmoid, backend::Backend,
+    Bool, BoolStore, DType, FloatDType, Tensor, TensorData,
+    activation::{log_sigmoid, sigmoid},
+    backend::Backend,
 };
 
 use crate::model::{ModelOutput, sigmoid as sigmoid_scalar};
@@ -62,8 +64,6 @@ struct LossShapedTensorCache<B: Backend> {
     dtype: DType,
     shape: [usize; 4],
     one: Tensor<B, 4>,
-    min_probability: Tensor<B, 4>,
-    max_probability: Tensor<B, 4>,
 }
 
 impl<B: Backend> LossTensorCache<B> {
@@ -100,8 +100,6 @@ impl<B: Backend> LossTensorCache<B> {
             dtype: DType::F32,
             shape,
             one: cached_full(shape, 1.0, device),
-            min_probability: cached_full(shape, 1e-6, device),
-            max_probability: cached_full(shape, 1.0 - 1e-6, device),
         });
     }
 
@@ -118,22 +116,6 @@ impl<B: Backend> LossTensorCache<B> {
             .as_ref()
             .expect("loss tensor cache shape should be initialized")
             .one
-            .clone()
-    }
-
-    fn min_probability(&self) -> Tensor<B, 4> {
-        self.shaped
-            .as_ref()
-            .expect("loss tensor cache shape should be initialized")
-            .min_probability
-            .clone()
-    }
-
-    fn max_probability(&self) -> Tensor<B, 4> {
-        self.shaped
-            .as_ref()
-            .expect("loss tensor cache shape should be initialized")
-            .max_probability
             .clone()
     }
 }
@@ -362,12 +344,8 @@ fn masked_bce_tensor<B: Backend>(
     mask: Tensor<B, 4>,
     cache: &LossTensorCache<B>,
 ) -> Tensor<B, 1> {
-    let probs = sigmoid(logits)
-        .max_pair(cache.min_probability())
-        .min_pair(cache.max_probability());
-    let inverse_targets = cache.shaped_one() - targets.clone();
-    let inverse_probs = cache.shaped_one() - probs.clone();
-    let bce = (targets.clone() * probs.clone().log() + inverse_targets * inverse_probs.log()).neg();
+    let inverse_targets = cache.shaped_one() - targets;
+    let bce = logits.clone() * inverse_targets - log_sigmoid(logits);
     let masked = bce * mask.clone();
     masked.sum() / mask.sum().max_pair(cache.one())
 }

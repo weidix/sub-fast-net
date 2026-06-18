@@ -687,6 +687,41 @@ fn tensor_loss_breakdown_matches_legacy_tensor_formula() {
     assert!(max_error <= 1e-6, "max_error={max_error}");
 }
 
+#[test]
+fn tensor_bce_uses_logit_stable_unsaturated_formula() {
+    let device = Default::default();
+    let output = ModelOutput {
+        text_region_logits: Tensor::<CpuAutodiffBackend, 1>::from_floats([-20.0, 20.0], &device)
+            .reshape([1, 1, 1, 2])
+            .require_grad(),
+        kernel_logits: Tensor::<CpuAutodiffBackend, 1>::from_floats([20.0, -20.0], &device)
+            .reshape([1, 1, 1, 2])
+            .require_grad(),
+        width: 2,
+        height: 1,
+    };
+    let gt_text =
+        Tensor::<CpuAutodiffBackend, 1>::from_floats([1.0, 0.0], &device).reshape([1, 1, 1, 2]);
+    let gt_kernel =
+        Tensor::<CpuAutodiffBackend, 1>::from_floats([0.0, 1.0], &device).reshape([1, 1, 1, 2]);
+    let training_mask =
+        Tensor::<CpuAutodiffBackend, 1>::from_floats([1.0, 1.0], &device).reshape([1, 1, 1, 2]);
+
+    let loss = compute_tensor_loss_breakdown(&output, gt_text, gt_kernel, training_mask)
+        .to_cpu_loss_breakdown();
+
+    assert!(
+        (loss.region_bce_loss - 20.0).abs() <= 1e-4,
+        "region_bce_loss={}",
+        loss.region_bce_loss
+    );
+    assert!(
+        (loss.kernel_bce_loss - 20.0).abs() <= 1e-4,
+        "kernel_bce_loss={}",
+        loss.kernel_bce_loss
+    );
+}
+
 fn legacy_tensor_loss_breakdown_values(
     output: &ModelOutput<CpuAutodiffBackend>,
     gt_text: Tensor<CpuAutodiffBackend, 4>,
