@@ -1,8 +1,8 @@
 experiment_name = "subfastnet_tiny"
-output_dir = "outputs/subfastnet_tiny_cuda"
+output_dir = "outputs/subfastnet_tiny_wgpu"
 seed = 42
-backend = "cuda"
-mixed_precision = "bf16"
+backend = "wgpu"
+mixed_precision = "off"
 
 train_roots = [
   "data/generated_samples1",
