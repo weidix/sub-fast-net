@@ -1,0 +1,21 @@
+target/
+data/
+vendor/
+
+# Local/editor files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs and temporary outputs
+*.log
+tmp/
+temp/
+out/
+
+# Tooling caches
+.venv/
+__pycache__/
+.paddlex_cache/

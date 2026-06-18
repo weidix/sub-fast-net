@@ -1,0 +1,30 @@
+[package]
+name = "sub-fast-net"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = ["backend-cpu", "backend-wgpu"]
+backend-cpu = ["burn/cpu"]
+backend-cuda = ["burn/cuda", "burn/autotune"]
+backend-wgpu = ["burn/wgpu"]
+
+[dependencies]
+anyhow = "1.0"
+burn = { version = "0.21", default-features = false, features = ["std", "train", "tui", "metrics", "ndarray"] }
+burn-dataset = "0.21"
+clap = { version = "4.5", features = ["derive"] }
+fast_image_resize = { version = "6.0", default-features = true, features = ["image", "rayon"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+imageproc = "0.25"
+ndarray = "0.16"
+num-traits = "0.2"
+rand = "0.9"
+rayon = "1.10"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+zune-jpeg = "0.5"
