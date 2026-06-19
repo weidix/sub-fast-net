@@ -1,7 +1,6 @@
 use std::{
     fs::{self, OpenOptions},
     io::Write,
-    marker::PhantomData,
     path::Path,
     sync::{
         Arc,
@@ -13,9 +12,9 @@ use std::{
 
 use anyhow::{Context, Result, anyhow};
 use burn::{
-    module::{AutodiffModule, ModuleVisitor, Param},
+    module::AutodiffModule,
     optim::{AdamConfig, GradientsParams, Optimizer},
-    tensor::{Bool, BoolStore, DType, Tensor, backend::AutodiffBackend},
+    tensor::{Tensor, backend::AutodiffBackend},
 };
 use serde::Serialize;
 
@@ -24,7 +23,7 @@ use crate::{
         CheckpointMeta, load_optimizer_record, load_scheduler_state, model_artifact_size_bytes,
         save_checkpoint, save_optimizer_record,
     },
-    config::{MixedPrecision, ProfilingAblation, TrainConfig},
+    config::{ProfilingAblation, TrainConfig},
     dataset::SubtitleDataset,
     loss::{
         LossComponentSelection, LossTensorCache,
@@ -35,11 +34,6 @@ use crate::{
     preprocess::{collate_batch_with_config, preprocess_sample},
     validate::{validate_model, write_error_reports},
 };
-
-const FP16_INITIAL_LOSS_SCALE: f32 = 1024.0;
-const FP16_MIN_LOSS_SCALE: f32 = 1.0;
-const FP16_MAX_LOSS_SCALE: f32 = 65536.0;
-const FP16_LOSS_SCALE_GROWTH_INTERVAL: usize = 2000;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TrainStepMetrics {
@@ -214,7 +208,6 @@ pub fn train_backend<B: burn::tensor::backend::AutodiffBackend>(
     let mut model = SubFastNet::<B>::new(config.model_variant, &device);
     let mut optimizer = AdamConfig::new().init::<B, SubFastNet<B>>();
     let mut loss_tensor_cache = LossTensorCache::<B>::new(&device);
-    let mut loss_scaler = Fp16LossScaler::new(config.mixed_precision);
     let mut best_f1 = 0.0;
     let mut step = 0;
     let mut start_epoch = 1;
@@ -439,12 +432,7 @@ pub fn train_backend<B: burn::tensor::backend::AutodiffBackend>(
                 if let Some(loss) = loss.as_ref()
                     && !loss.total_loss_is_finite()
                 {
-                    loss_scaler.backoff();
-                    println!(
-                        "mixed_precision_skip_update step={} reason=non_finite_loss loss_scale={:.1}",
-                        step + 1,
-                        loss_scaler.scale()
-                    );
+                    println!("skip_update step={} reason=non_finite_loss", step + 1);
                     sync_training_device::<B>(&device, "after non-finite loss skip")?;
                     continue;
                 }
@@ -452,7 +440,6 @@ pub fn train_backend<B: burn::tensor::backend::AutodiffBackend>(
                     profile_section(profile_timing, config.profiling_enabled, "backward", || {
                         profile_backward_loss(config.profiling_ablation, &output, loss.as_ref())
                             .map(|backward_loss| {
-                                let backward_loss = loss_scaler.scale_loss(backward_loss);
                                 GradientsParams::from_grads(backward_loss.backward(), &model)
                             })
                     })?;
@@ -460,17 +447,6 @@ pub fn train_backend<B: burn::tensor::backend::AutodiffBackend>(
                 backward_gpu_time = gpu_time;
                 profile.backward_call_count = 1;
                 let grads = grads.context("profiling ablation did not produce a backward loss")?;
-                let (grads, grads_finite) = loss_scaler.unscale_and_check::<B, _>(grads, &model);
-                if !grads_finite {
-                    loss_scaler.backoff();
-                    println!(
-                        "mixed_precision_skip_update step={} reason=non_finite_grad loss_scale={:.1}",
-                        step + 1,
-                        loss_scaler.scale()
-                    );
-                    sync_training_device::<B>(&device, "after non-finite grad skip")?;
-                    continue;
-                }
                 if needs_optimizer {
                     let (updated_model, cpu_time, gpu_time) = profile_section(
                         profile_timing,
@@ -481,7 +457,6 @@ pub fn train_backend<B: burn::tensor::backend::AutodiffBackend>(
                     model = updated_model;
                     optimizer_cpu_time = cpu_time;
                     optimizer_gpu_time = gpu_time;
-                    loss_scaler.update_after_success();
                 }
             }
 
@@ -656,123 +631,6 @@ pub fn train_backend<B: burn::tensor::backend::AutodiffBackend>(
 fn sync_training_device<B: AutodiffBackend>(device: &B::Device, stage: &'static str) -> Result<()> {
     B::sync(device).with_context(|| format!("failed to synchronize training device {stage}"))?;
     Ok(())
-}
-
-#[derive(Debug, Clone)]
-struct Fp16LossScaler {
-    enabled: bool,
-    scale: f32,
-    finite_steps: usize,
-}
-
-impl Fp16LossScaler {
-    fn new(mixed_precision: MixedPrecision) -> Self {
-        Self {
-            enabled: mixed_precision == MixedPrecision::Fp16,
-            scale: FP16_INITIAL_LOSS_SCALE,
-            finite_steps: 0,
-        }
-    }
-
-    fn scale(&self) -> f32 {
-        if self.enabled { self.scale } else { 1.0 }
-    }
-
-    fn scale_loss<B: AutodiffBackend>(&self, loss: Tensor<B, 1>) -> Tensor<B, 1> {
-        if self.enabled {
-            loss * self.scale
-        } else {
-            loss
-        }
-    }
-
-    fn unscale_and_check<B, M>(&self, grads: GradientsParams, model: &M) -> (GradientsParams, bool)
-    where
-        B: AutodiffBackend,
-        M: AutodiffModule<B>,
-    {
-        if !self.enabled {
-            return (grads, true);
-        }
-        let mut visitor = GradientsFiniteVisitor::<B> {
-            input: grads,
-            output: GradientsParams::new(),
-            inv_scale: 1.0 / self.scale,
-            finite: true,
-            backend: PhantomData,
-        };
-        model.visit(&mut visitor);
-        (visitor.output, visitor.finite)
-    }
-
-    fn backoff(&mut self) {
-        if !self.enabled {
-            return;
-        }
-        self.scale = (self.scale * 0.5).max(FP16_MIN_LOSS_SCALE);
-        self.finite_steps = 0;
-    }
-
-    fn update_after_success(&mut self) {
-        if !self.enabled {
-            return;
-        }
-        self.finite_steps += 1;
-        if self.finite_steps >= FP16_LOSS_SCALE_GROWTH_INTERVAL {
-            self.scale = (self.scale * 2.0).min(FP16_MAX_LOSS_SCALE);
-            self.finite_steps = 0;
-        }
-    }
-}
-
-struct GradientsFiniteVisitor<B: AutodiffBackend> {
-    input: GradientsParams,
-    output: GradientsParams,
-    inv_scale: f32,
-    finite: bool,
-    backend: PhantomData<B>,
-}
-
-impl<B: AutodiffBackend> ModuleVisitor<B> for GradientsFiniteVisitor<B> {
-    fn visit_float<const D: usize>(&mut self, param: &Param<Tensor<B, D>>) {
-        let Some(grad) = self.input.remove::<B::InnerBackend, D>(param.id) else {
-            return;
-        };
-        let grad = grad * self.inv_scale;
-        if !bool_scalar_tensor_value(grad.clone().is_finite().all()) {
-            self.finite = false;
-        }
-        self.output.register::<B::InnerBackend, D>(param.id, grad);
-    }
-}
-
-fn bool_scalar_tensor_value<B: burn::tensor::backend::Backend>(tensor: Tensor<B, 1, Bool>) -> bool {
-    let data = tensor.into_data();
-    match data.dtype {
-        DType::Bool(BoolStore::Native) => data
-            .to_vec::<bool>()
-            .expect("scalar tensor should be native bool")
-            .first()
-            .copied()
-            .expect("scalar tensor should contain one value"),
-        DType::Bool(BoolStore::U8) => {
-            data.to_vec::<u8>()
-                .expect("scalar tensor should be u8 bool")
-                .first()
-                .copied()
-                .expect("scalar tensor should contain one value")
-                != 0
-        }
-        DType::Bool(BoolStore::U32) => {
-            data.to_vec::<u32>()
-                .expect("scalar tensor should be u32 bool")
-                .first()
-                .copied()
-                .expect("scalar tensor should contain one value")
-                != 0
-        }
-        dtype => panic!("scalar tensor should be bool, got {dtype:?}"),
-    }
 }
 
 impl TrainProfilingStep {

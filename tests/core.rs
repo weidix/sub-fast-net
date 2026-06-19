@@ -35,16 +35,27 @@ fn parses_yolo_labels() {
 }
 
 #[test]
-fn mixed_precision_defaults_to_off_and_requires_cuda() {
-    let config = TrainConfig::default();
-    assert_eq!(
-        config.mixed_precision,
-        sub_fast_net::config::MixedPrecision::Off
-    );
+fn mixed_precision_config_field_is_rejected() {
+    let output_dir = Path::new("outputs/test_removed_mixed_precision_config");
+    let _ = fs::remove_dir_all(output_dir);
+    fs::create_dir_all(output_dir).unwrap();
+    let config_path = output_dir.join("train.toml");
+    fs::write(
+        &config_path,
+        r#"
+experiment_name = "test_removed_mixed_precision"
+output_dir = "outputs/test_removed_mixed_precision_config/run"
+seed = 7
+backend = "cuda"
+mixed_precision = "bf16"
+train_roots = ["data/generated_samples1"]
+val_root = "data/validation_samples"
+"#,
+    )
+    .unwrap();
 
-    let mut config = smoke_test_config("outputs/test_mixed_precision_validation");
-    config.mixed_precision = sub_fast_net::config::MixedPrecision::Bf16;
-    assert!(config.validate().is_err());
+    let err = TrainConfig::from_path(&config_path).unwrap_err();
+    assert!(err.to_string().contains("mixed_precision has been removed"));
 }
 
 #[test]

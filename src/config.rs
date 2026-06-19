@@ -10,7 +10,6 @@ pub struct TrainConfig {
     pub output_dir: String,
     pub seed: u64,
     pub backend: BackendKind,
-    pub mixed_precision: MixedPrecision,
     pub train_roots: Vec<String>,
     pub val_root: String,
     pub model_variant: ModelVariant,
@@ -68,14 +67,6 @@ pub enum BackendKind {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum MixedPrecision {
-    Off,
-    Bf16,
-    Fp16,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
 pub enum ModelVariant {
     Tiny,
     Small,
@@ -109,7 +100,6 @@ impl Default for TrainConfig {
             output_dir: "outputs/subfastnet_tiny".to_string(),
             seed: 42,
             backend: BackendKind::Wgpu,
-            mixed_precision: MixedPrecision::Off,
             train_roots: vec![
                 "data/generated_samples1".to_string(),
                 "data/generated_samples2".to_string(),
@@ -170,6 +160,11 @@ impl TrainConfig {
         let path = path.as_ref();
         let text = fs::read_to_string(path)
             .with_context(|| format!("failed to read config {}", path.display()))?;
+        let raw: toml::Value = toml::from_str(&text)
+            .with_context(|| format!("failed to parse config {}", path.display()))?;
+        if raw.get("mixed_precision").is_some() {
+            bail!("mixed_precision has been removed; all training uses FP32");
+        }
         let config: Self = toml::from_str(&text)
             .with_context(|| format!("failed to parse config {}", path.display()))?;
         config.validate()?;
@@ -197,9 +192,6 @@ impl TrainConfig {
         }
         if self.pooling_size == 0 || self.pooling_size.is_multiple_of(2) {
             bail!("pooling_size must be a positive odd number");
-        }
-        if self.mixed_precision != MixedPrecision::Off && self.backend != BackendKind::Cuda {
-            bail!("mixed_precision requires backend = \"cuda\"");
         }
         if self.scale_min <= 0.0 || self.scale_max < self.scale_min {
             bail!("scale_min/scale_max must define a positive range");
