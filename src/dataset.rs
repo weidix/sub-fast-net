@@ -153,7 +153,7 @@ impl SubtitleDataset {
         )?];
         let mut dataset = Self::from_roots(DatasetSplit::Val, config.strict_dataset, roots)?;
         if let Some(max) = config.max_val_samples {
-            dataset.samples.truncate(max);
+            dataset.samples = balanced_sample_limit(&dataset.samples, max);
         }
         Ok(dataset)
     }
@@ -377,33 +377,49 @@ fn balanced_sample_limit(samples: &[SampleIndex], max: usize) -> Vec<SampleIndex
     if max >= samples.len() {
         return samples.to_vec();
     }
-    let mut by_root = BTreeMap::<usize, Vec<SampleIndex>>::new();
+    let mut by_root = BTreeMap::<usize, (Vec<SampleIndex>, Vec<SampleIndex>)>::new();
     for sample in samples {
-        by_root
-            .entry(sample.root_id)
-            .or_default()
-            .push(sample.clone());
+        let (labeled, unlabeled) = by_root.entry(sample.root_id).or_default();
+        if sample_has_nonempty_label(sample) {
+            labeled.push(sample.clone());
+        } else {
+            unlabeled.push(sample.clone());
+        }
     }
-    let mut cursors = BTreeMap::<usize, usize>::new();
+    let mut labeled_cursors = BTreeMap::<usize, usize>::new();
+    let mut unlabeled_cursors = BTreeMap::<usize, usize>::new();
     let mut limited = Vec::with_capacity(max);
-    while limited.len() < max {
-        let mut pushed = false;
-        for (root_id, root_samples) in &by_root {
-            if limited.len() >= max {
+    for prefer_labeled in [true, false] {
+        while limited.len() < max {
+            let mut pushed = false;
+            for (root_id, (labeled_samples, unlabeled_samples)) in &by_root {
+                if limited.len() >= max {
+                    break;
+                }
+                let (root_samples, cursors) = if prefer_labeled {
+                    (labeled_samples, &mut labeled_cursors)
+                } else {
+                    (unlabeled_samples, &mut unlabeled_cursors)
+                };
+                let cursor = cursors.entry(*root_id).or_default();
+                if let Some(sample) = root_samples.get(*cursor) {
+                    limited.push(sample.clone());
+                    *cursor += 1;
+                    pushed = true;
+                }
+            }
+            if !pushed {
                 break;
             }
-            let cursor = cursors.entry(*root_id).or_default();
-            if let Some(sample) = root_samples.get(*cursor) {
-                limited.push(sample.clone());
-                *cursor += 1;
-                pushed = true;
-            }
-        }
-        if !pushed {
-            break;
         }
     }
     limited
+}
+
+fn sample_has_nonempty_label(sample: &SampleIndex) -> bool {
+    fs::metadata(&sample.label_path)
+        .map(|metadata| metadata.len() > 0)
+        .unwrap_or(false)
 }
 
 impl burn_dataset::Dataset<DatasetSample> for SubtitleDataset {

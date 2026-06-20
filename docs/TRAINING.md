@@ -10,6 +10,18 @@ region BCE + region Dice + kernel BCE + kernel Dice
 
 `training_mask = 0` excludes ignored or unreliable regions from loss.
 
+`optimizer` selects the training optimizer. The default is `adam`, and `sgd` is
+available for profiling or experiments that explicitly accept different training
+dynamics. `gradient_accumulation_steps` defaults to `1`; values above `1`
+average gradients across multiple backward passes before an optimizer step. This
+keeps the Adam training path available while reducing expensive WGPU optimizer
+updates on macOS.
+
+The macOS/WGPU training config uses a lower `input_size`/`short_size`, larger
+batch, sparse logging, and Adam gradient accumulation so one epoch over the
+current `data/` training roots can stay near the 30 minute target without
+switching to a different loss or detector head.
+
 Checkpoints are written to:
 
 ```text

@@ -435,7 +435,7 @@ pub fn preprocess_sample(
     let image = image::ImageReader::open(&sample.image_path)?
         .decode()?
         .to_rgb8();
-    let state = if training {
+    let state = if training && config.augment_enabled {
         preprocess_training_state(sample, config, image)
     } else {
         preprocess_validation_state(sample, config, image)

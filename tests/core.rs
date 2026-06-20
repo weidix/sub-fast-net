@@ -4,7 +4,7 @@ use burn::tensor::{Tensor, activation::sigmoid};
 use sub_fast_net::{
     backend::CpuAutodiffBackend,
     benchmark::benchmark_train_step_backend,
-    config::{BackendKind, ModelVariant, TrainConfig},
+    config::{BackendKind, ModelVariant, OptimizerKind, TrainConfig},
     dataset::{
         DatasetRoot, DatasetSplit, RawLabelMaskFile, RawLabelMaskRecord, SubtitleDataset,
         apply_label_masks, load_annotations, load_root, parse_yolo_label_text,
@@ -24,7 +24,7 @@ use sub_fast_net::{
         generate_targets_with_config,
     },
     train::train_backend,
-    validate::validate_model,
+    validate::{restore_gt_boxes_to_output_space, validate_model},
 };
 
 #[test]
@@ -56,6 +56,35 @@ val_root = "data/validation_samples"
 
     let err = TrainConfig::from_path(&config_path).unwrap_err();
     assert!(err.to_string().contains("mixed_precision has been removed"));
+}
+
+#[test]
+fn optimizer_kind_defaults_to_adam_and_parses_sgd() {
+    assert_eq!(TrainConfig::default().optimizer, OptimizerKind::Adam);
+    assert_eq!(TrainConfig::default().gradient_accumulation_steps, 1);
+
+    let output_dir = Path::new("outputs/test_optimizer_config");
+    let _ = fs::remove_dir_all(output_dir);
+    fs::create_dir_all(output_dir).unwrap();
+    let config_path = output_dir.join("train.toml");
+    fs::write(
+        &config_path,
+        r#"
+experiment_name = "test_optimizer_config"
+output_dir = "outputs/test_optimizer_config/run"
+seed = 7
+backend = "cpu"
+optimizer = "sgd"
+gradient_accumulation_steps = 4
+train_roots = ["data/generated_samples1"]
+val_root = "data/validation_samples"
+"#,
+    )
+    .unwrap();
+
+    let config = TrainConfig::from_path(&config_path).unwrap();
+    assert_eq!(config.optimizer, OptimizerKind::Sgd);
+    assert_eq!(config.gradient_accumulation_steps, 4);
 }
 
 #[test]
@@ -397,6 +426,41 @@ fn max_train_samples_is_balanced_across_roots() {
 }
 
 #[test]
+fn max_train_samples_keeps_labeled_training_examples() {
+    let mut config = smoke_test_config("outputs/test_labeled_sample_limit");
+    config.train_roots = vec!["data/generated_samples1".to_string()];
+    config.max_train_samples = Some(2);
+    let dataset = SubtitleDataset::from_train_config(&config).unwrap();
+
+    let labeled_count = (0..dataset.len())
+        .map(|index| dataset.load_sample(index).unwrap())
+        .filter(|sample| !sample.pixel_boxes_after_label_masks.is_empty())
+        .count();
+
+    assert!(
+        labeled_count > 0,
+        "limited training dataset must include at least one labeled subtitle sample"
+    );
+}
+
+#[test]
+fn max_val_samples_keeps_labeled_validation_examples() {
+    let mut config = smoke_test_config("outputs/test_labeled_val_limit");
+    config.max_val_samples = Some(2);
+    let dataset = SubtitleDataset::from_val_config(&config).unwrap();
+
+    let labeled_count = (0..dataset.len())
+        .map(|index| dataset.load_sample(index).unwrap())
+        .filter(|sample| !sample.pixel_boxes_after_label_masks.is_empty())
+        .count();
+
+    assert!(
+        labeled_count > 0,
+        "limited validation dataset must include at least one labeled subtitle sample"
+    );
+}
+
+#[test]
 fn handles_empty_labels_and_strict_missing_root() {
     let dataset = SubtitleDataset::from_roots(
         DatasetSplit::Train,
@@ -435,6 +499,25 @@ fn preprocess_collate_and_forward_smoke() {
     assert_eq!(arch.feature_strides, [4, 8, 16]);
     assert_eq!(arch.output_stride, 4);
     assert_eq!(arch.detection_head_count, 2);
+}
+
+#[test]
+fn disabled_augmentation_uses_validation_geometry_for_training() {
+    let mut config = smoke_test_config("outputs/test_no_aug_training_geometry");
+    config.augment_enabled = false;
+    config.max_train_samples = Some(2);
+    let dataset = SubtitleDataset::from_train_config(&config).unwrap();
+    let sample = (0..dataset.len())
+        .map(|index| dataset.load_sample(index).unwrap())
+        .find(|sample| !sample.pixel_boxes_after_label_masks.is_empty())
+        .unwrap();
+
+    let training = preprocess_sample(&sample, &config, true).unwrap();
+    let validation = preprocess_sample(&sample, &config, false).unwrap();
+
+    assert_eq!(training.width, validation.width);
+    assert_eq!(training.height, validation.height);
+    assert_eq!(training.boxes, validation.boxes);
 }
 
 #[test]
@@ -533,6 +616,46 @@ fn restores_roi_crop_box_to_original_frame_pixels() {
     assert_eq!(restored.y1, 705.0);
     assert_eq!(restored.x2, 130.0);
     assert_eq!(restored.y2, 715.0);
+}
+
+#[test]
+fn validation_restores_gt_boxes_to_output_space() {
+    let meta = ImageMeta {
+        image_path: "image.jpg".to_string(),
+        sample_id: "image".to_string(),
+        original_width: 100,
+        original_height: 50,
+        resized_width: 200,
+        resized_height: 100,
+        scale: 2.0,
+        pad: [0, 0, 0, 0],
+        source: Some("video.mp4".to_string()),
+        frame_id: Some("42".to_string()),
+        coordinate_space: CoordinateSpace::Image,
+        roi_offset: None,
+        frame_width: None,
+        frame_height: None,
+    };
+
+    let restored = restore_gt_boxes_to_output_space(
+        &[PixelBox {
+            x1: 20.0,
+            y1: 10.0,
+            x2: 60.0,
+            y2: 30.0,
+        }],
+        &meta,
+    );
+
+    assert_eq!(
+        restored,
+        vec![PixelBox {
+            x1: 10.0,
+            y1: 5.0,
+            x2: 30.0,
+            y2: 15.0,
+        }]
+    );
 }
 
 #[test]
@@ -730,6 +853,46 @@ fn tensor_bce_uses_logit_stable_unsaturated_formula() {
         (loss.kernel_bce_loss - 20.0).abs() <= 1e-4,
         "kernel_bce_loss={}",
         loss.kernel_bce_loss
+    );
+}
+
+#[test]
+fn sparse_positive_bce_is_balanced_against_background() {
+    let output = sub_fast_net::model::CpuModelOutput {
+        text_region_logits: vec![vec![0.0, 0.0, 0.0, 0.0]],
+        kernel_logits: vec![vec![0.0, 0.0, 0.0, 0.0]],
+        width: 4,
+        height: 1,
+    };
+    let loss = compute_loss(
+        &output,
+        &[vec![1.0, 0.0, 0.0, 0.0]],
+        &[vec![1.0, 0.0, 0.0, 0.0]],
+        &[vec![1.0, 1.0, 1.0, 1.0]],
+    );
+
+    assert!(
+        (loss.region_bce_loss - std::f32::consts::LN_2 * 1.5).abs() <= 1e-6,
+        "region_bce_loss={}",
+        loss.region_bce_loss
+    );
+
+    let missing_positive = sub_fast_net::model::CpuModelOutput {
+        text_region_logits: vec![vec![-2.0, 0.0, 0.0, 0.0]],
+        kernel_logits: vec![vec![-2.0, 0.0, 0.0, 0.0]],
+        width: 4,
+        height: 1,
+    };
+    let missing_loss = compute_loss(
+        &missing_positive,
+        &[vec![1.0, 0.0, 0.0, 0.0]],
+        &[vec![1.0, 0.0, 0.0, 0.0]],
+        &[vec![1.0, 1.0, 1.0, 1.0]],
+    );
+
+    assert!(
+        missing_loss.region_bce_loss - loss.region_bce_loss > 0.5,
+        "missing positive should not be diluted by three background pixels"
     );
 }
 

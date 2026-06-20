@@ -16,7 +16,7 @@ use crate::{
     metrics::{DetectionMetricsAccumulator, match_detection_metrics, percentile},
     model::{SubFastNet, output_to_cpu},
     postprocess::{PostprocessConfig, postprocess_output},
-    preprocess::{PixelBox, collate_batch_with_config, preprocess_sample},
+    preprocess::{ImageMeta, PixelBox, collate_batch_with_config, preprocess_sample},
 };
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -144,7 +144,8 @@ pub fn validate_model(
             ),
         );
         losses.push(loss.total_loss);
-        for (predicted, gt) in detections.iter().zip(&batch.gt_boxes) {
+        for ((predicted, gt), meta) in detections.iter().zip(&batch.gt_boxes).zip(&batch.img_metas)
+        {
             let pred_boxes = predicted
                 .iter()
                 .map(|bbox| crate::preprocess::PixelBox {
@@ -154,7 +155,8 @@ pub fn validate_model(
                     y2: bbox.y2,
                 })
                 .collect::<Vec<_>>();
-            let metrics = match_detection_metrics(&pred_boxes, gt, config.iou_threshold);
+            let gt_boxes = restore_gt_boxes_to_output_space(gt, meta);
+            let metrics = match_detection_metrics(&pred_boxes, &gt_boxes, config.iou_threshold);
             aggregate.add(&metrics);
             evaluated_sample_count += 1;
         }
@@ -317,7 +319,11 @@ pub fn write_error_reports(
                 y2: bbox.y2,
             })
             .collect::<Vec<_>>();
-        let gt = batch.gt_boxes.into_iter().next().unwrap_or_default();
+        let gt = batch
+            .gt_boxes
+            .first()
+            .map(|boxes| restore_gt_boxes_to_output_space(boxes, &batch.img_metas[0]))
+            .unwrap_or_default();
         let ious = best_ious(&pred, &gt);
         let metrics = match_detection_metrics(&pred, &gt, config.iou_threshold);
         if metrics.false_positive_count > 0 {
@@ -396,6 +402,14 @@ fn best_ious(pred: &[PixelBox], gt: &[PixelBox]) -> Vec<f32> {
                 .map(|gt_box| crate::metrics::bbox_iou(*pred_box, *gt_box))
                 .fold(0.0_f32, f32::max)
         })
+        .collect()
+}
+
+pub fn restore_gt_boxes_to_output_space(boxes: &[PixelBox], meta: &ImageMeta) -> Vec<PixelBox> {
+    boxes
+        .iter()
+        .copied()
+        .map(|bbox| crate::preprocess::restore_box_to_output_space(bbox, meta))
         .collect()
 }
 

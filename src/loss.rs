@@ -189,18 +189,38 @@ pub fn compute_loss(
 
 fn masked_bce(logits: &[Vec<f32>], targets: &[Vec<f32>], masks: &[Vec<f32>]) -> f32 {
     let mut loss = 0.0;
-    let mut count: f32 = 0.0;
+    let mut positive_count: f32 = 0.0;
+    let mut negative_count: f32 = 0.0;
+    for (target, mask) in targets.iter().zip(masks) {
+        for (target_value, mask_value) in target.iter().zip(mask) {
+            if *mask_value <= 0.0 {
+                continue;
+            }
+            if *target_value > 0.5 {
+                positive_count += 1.0;
+            } else {
+                negative_count += 1.0;
+            }
+        }
+    }
+    let valid_count = positive_count + negative_count;
+    let positive_weight = if positive_count > 0.0 {
+        negative_count / positive_count
+    } else {
+        1.0
+    };
     for ((logit, target), mask) in logits.iter().zip(targets).zip(masks) {
         for ((logit_value, target_value), mask_value) in logit.iter().zip(target).zip(mask) {
             if *mask_value <= 0.0 {
                 continue;
             }
             let p = sigmoid_scalar(*logit_value).clamp(1e-6, 1.0 - 1e-6);
-            loss += -(*target_value * p.ln() + (1.0 - *target_value) * (1.0 - p).ln());
-            count += 1.0;
+            let positive_loss = -*target_value * p.ln() * positive_weight;
+            let negative_loss = -(1.0 - *target_value) * (1.0 - p).ln();
+            loss += positive_loss + negative_loss;
         }
     }
-    loss / count.max(1.0)
+    loss / valid_count.max(1.0)
 }
 
 fn masked_dice(logits: &[Vec<f32>], targets: &[Vec<f32>], masks: &[Vec<f32>]) -> f32 {
@@ -344,8 +364,14 @@ fn masked_bce_tensor<B: Backend>(
     mask: Tensor<B, 4>,
     cache: &LossTensorCache<B>,
 ) -> Tensor<B, 1> {
-    let inverse_targets = cache.shaped_one() - targets;
-    let bce = logits.clone() * inverse_targets - log_sigmoid(logits);
+    let inverse_targets = cache.shaped_one() - targets.clone();
+    let positive_count = (targets.clone() * mask.clone()).sum();
+    let negative_count = (inverse_targets.clone() * mask.clone()).sum();
+    let positive_weight =
+        (negative_count.clone() / positive_count.max_pair(cache.one())).reshape([1, 1, 1, 1]);
+    let positive_loss = -targets * log_sigmoid(logits.clone()) * positive_weight;
+    let negative_loss = (logits.clone() - log_sigmoid(logits)) * inverse_targets;
+    let bce = positive_loss + negative_loss;
     let masked = bce * mask.clone();
     masked.sum() / mask.sum().max_pair(cache.one())
 }

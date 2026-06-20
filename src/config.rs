@@ -21,6 +21,8 @@ pub struct TrainConfig {
     pub batch_size: usize,
     pub epochs: usize,
     pub learning_rate: f32,
+    pub optimizer: OptimizerKind,
+    pub gradient_accumulation_steps: usize,
     pub validation_interval: usize,
     pub checkpoint_interval: usize,
     pub log_interval: usize,
@@ -73,6 +75,13 @@ pub enum ModelVariant {
     Base,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum OptimizerKind {
+    Adam,
+    Sgd,
+}
+
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ProfilingAblation {
@@ -117,6 +126,8 @@ impl Default for TrainConfig {
             batch_size: 16,
             epochs: 100,
             learning_rate: 0.001,
+            optimizer: OptimizerKind::Adam,
+            gradient_accumulation_steps: 1,
             validation_interval: 1,
             checkpoint_interval: 1,
             log_interval: 50,
@@ -183,6 +194,9 @@ impl TrainConfig {
         }
         if self.prefetch_batches == 0 {
             bail!("prefetch_batches must be greater than zero");
+        }
+        if self.gradient_accumulation_steps == 0 {
+            bail!("gradient_accumulation_steps must be greater than zero");
         }
         if self.input_width().min(self.input_height()) == 0 {
             bail!("input size must be greater than zero");

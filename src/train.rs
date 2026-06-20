@@ -13,7 +13,7 @@ use std::{
 use anyhow::{Context, Result, anyhow};
 use burn::{
     module::AutodiffModule,
-    optim::{AdamConfig, GradientsParams, Optimizer},
+    optim::{AdamConfig, GradientsAccumulator, GradientsParams, Optimizer, SgdConfig},
     tensor::{Tensor, backend::AutodiffBackend},
 };
 use serde::Serialize;
@@ -23,7 +23,7 @@ use crate::{
         CheckpointMeta, load_optimizer_record, load_scheduler_state, model_artifact_size_bytes,
         save_checkpoint, save_optimizer_record,
     },
-    config::{ProfilingAblation, TrainConfig},
+    config::{OptimizerKind, ProfilingAblation, TrainConfig},
     dataset::SubtitleDataset,
     loss::{
         LossComponentSelection, LossTensorCache,
@@ -199,6 +199,24 @@ pub fn train(config: &TrainConfig) -> Result<TrainingSummary> {
 pub fn train_backend<B: burn::tensor::backend::AutodiffBackend>(
     config: &TrainConfig,
 ) -> Result<TrainingSummary> {
+    match config.optimizer {
+        OptimizerKind::Adam => {
+            train_backend_with_optimizer(config, AdamConfig::new().init::<B, SubFastNet<B>>())
+        }
+        OptimizerKind::Sgd => {
+            train_backend_with_optimizer(config, SgdConfig::new().init::<B, SubFastNet<B>>())
+        }
+    }
+}
+
+fn train_backend_with_optimizer<B, O>(
+    config: &TrainConfig,
+    mut optimizer: O,
+) -> Result<TrainingSummary>
+where
+    B: burn::tensor::backend::AutodiffBackend,
+    O: Optimizer<SubFastNet<B>, B>,
+{
     config.save_snapshot()?;
     let device = B::Device::default();
     let profile_timing = WallClockProfiler;
@@ -206,8 +224,9 @@ pub fn train_backend<B: burn::tensor::backend::AutodiffBackend>(
     let train_dataset = Arc::new(SubtitleDataset::from_train_config(config)?);
     let val_dataset = SubtitleDataset::from_val_config(config)?;
     let mut model = SubFastNet::<B>::new(config.model_variant, &device);
-    let mut optimizer = AdamConfig::new().init::<B, SubFastNet<B>>();
     let mut loss_tensor_cache = LossTensorCache::<B>::new(&device);
+    let mut grad_accumulator = GradientsAccumulator::<SubFastNet<B>>::new();
+    let mut accumulated_grad_steps = 0usize;
     let mut best_f1 = 0.0;
     let mut step = 0;
     let mut start_epoch = 1;
@@ -379,6 +398,8 @@ pub fn train_backend<B: burn::tensor::backend::AutodiffBackend>(
             let needs_loss = config.profiling_ablation.needs_loss();
             let needs_backward = config.profiling_ablation.needs_backward();
             let needs_optimizer = config.profiling_ablation.needs_optimizer();
+            let record_train_metrics =
+                should_record_train_metrics(config, step + 1, prepared.epoch_batch, epoch_batches);
             let mut loss = None;
             let mut target_cpu_time = 0.0;
             let mut target_gpu_time = None;
@@ -429,7 +450,8 @@ pub fn train_backend<B: burn::tensor::backend::AutodiffBackend>(
                 loss = Some(computed_loss);
             }
             if needs_backward {
-                if let Some(loss) = loss.as_ref()
+                if record_train_metrics
+                    && let Some(loss) = loss.as_ref()
                     && !loss.total_loss_is_finite()
                 {
                     println!("skip_update step={} reason=non_finite_loss", step + 1);
@@ -448,15 +470,26 @@ pub fn train_backend<B: burn::tensor::backend::AutodiffBackend>(
                 profile.backward_call_count = 1;
                 let grads = grads.context("profiling ablation did not produce a backward loss")?;
                 if needs_optimizer {
-                    let (updated_model, cpu_time, gpu_time) = profile_section(
-                        profile_timing,
-                        config.profiling_enabled,
-                        "optimizer_step",
-                        || optimizer.step(learning_rate as f64, model, grads),
-                    )?;
-                    model = updated_model;
-                    optimizer_cpu_time = cpu_time;
-                    optimizer_gpu_time = gpu_time;
+                    grad_accumulator.accumulate(&model, grads);
+                    accumulated_grad_steps += 1;
+                    let should_step_optimizer = accumulated_grad_steps
+                        >= config.gradient_accumulation_steps.max(1)
+                        || prepared.epoch_batch == epoch_batches;
+                    if should_step_optimizer {
+                        let accumulated_steps = accumulated_grad_steps.max(1);
+                        let grads = grad_accumulator.grads();
+                        accumulated_grad_steps = 0;
+                        let step_learning_rate = learning_rate / accumulated_steps as f32;
+                        let (updated_model, cpu_time, gpu_time) = profile_section(
+                            profile_timing,
+                            config.profiling_enabled,
+                            "optimizer_step",
+                            || optimizer.step(step_learning_rate as f64, model, grads),
+                        )?;
+                        model = updated_model;
+                        optimizer_cpu_time = cpu_time;
+                        optimizer_gpu_time = gpu_time;
+                    }
                 }
             }
 
@@ -480,7 +513,9 @@ pub fn train_backend<B: burn::tensor::backend::AutodiffBackend>(
             profile.optimizer_step_cpu_time = optimizer_cpu_time;
 
             step += 1;
-            if let Some(loss) = loss {
+            if let Some(loss) = loss
+                && record_train_metrics
+            {
                 let timed_start = Instant::now();
                 let loss = loss.to_cpu_loss_breakdown();
                 profile.loss_to_cpu_breakdown_time = timed_start.elapsed().as_secs_f32();
@@ -504,20 +539,22 @@ pub fn train_backend<B: burn::tensor::backend::AutodiffBackend>(
                     positive_kernel_ratio: loss.positive_kernel_ratio,
                 };
                 tui.update_train(&metrics);
-                if step % config.log_interval.max(1) == 0 {
-                    print_training_status(config, &metrics, tui.is_active());
-                }
+                print_training_status(config, &metrics, tui.is_active());
                 let timed_start = Instant::now();
                 writeln!(metrics_file, "{}", serde_json::to_string(&metrics)?)?;
                 profile.metrics_write_time = timed_start.elapsed().as_secs_f32();
             }
             profile.batch_wall_time = batch_time;
             profile.batch_time = batch_time;
+            if config.profiling_enabled {
+                let timed_start = Instant::now();
+                sync_training_device::<B>(&device, "after train step")?;
+                profile.backend_sync_time = timed_start.elapsed().as_secs_f32();
+            }
             if let Some(profile_file) = &mut profile_file {
                 writeln!(profile_file, "{}", serde_json::to_string(&profile)?)?;
                 profiler.push(profile);
             }
-            sync_training_device::<B>(&device, "after train step")?;
         }
         drop(batch_receiver);
         let worker_result = join_prefetch_worker(prefetch_worker);
@@ -953,6 +990,15 @@ where
     save_checkpoint(path, model, meta)?;
     save_optimizer_record::<O, B>(path, optimizer)?;
     Ok(())
+}
+
+fn should_record_train_metrics(
+    config: &TrainConfig,
+    step: usize,
+    epoch_batch: usize,
+    epoch_batches: usize,
+) -> bool {
+    step == 1 || epoch_batch == epoch_batches || step.is_multiple_of(config.log_interval.max(1))
 }
 
 fn print_training_status(config: &TrainConfig, metrics: &TrainStepMetrics, tui_active: bool) {

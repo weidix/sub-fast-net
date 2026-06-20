@@ -47,6 +47,8 @@ pub struct BenchmarkSummary {
     pub postprocess_latency_p95: f32,
     pub candidate_count: usize,
     pub final_box_count: usize,
+    pub max_region_probability: f32,
+    pub max_kernel_probability: f32,
     pub train_step_time_note: String,
     pub memory_usage: String,
 }
@@ -97,6 +99,8 @@ pub fn benchmark_backend<B: Backend>(
     let mut end_to_end_latencies = Vec::new();
     let mut candidate_count = 0;
     let mut final_box_count = 0;
+    let mut max_region_probability = 0.0_f32;
+    let mut max_kernel_probability = 0.0_f32;
     for sample in &samples {
         let preprocess_start = Instant::now();
         let preprocessed = preprocess_sample(sample, config, false)?;
@@ -105,6 +109,9 @@ pub fn benchmark_backend<B: Backend>(
         let forward_start = Instant::now();
         let output = crate::model::output_to_cpu(model.forward(batch.image_tensor(&device)));
         let forward_time = forward_start.elapsed().as_secs_f32();
+        max_region_probability =
+            max_region_probability.max(max_sigmoid(&output.text_region_logits));
+        max_kernel_probability = max_kernel_probability.max(max_sigmoid(&output.kernel_logits));
         let post_start = Instant::now();
         let metas = feature_metas(
             &batch.img_metas,
@@ -199,6 +206,8 @@ pub fn benchmark_backend<B: Backend>(
         postprocess_latency_p95,
         candidate_count,
         final_box_count,
+        max_region_probability,
+        max_kernel_probability,
         train_step_time_note:
             "measured with one real autodiff forward/loss/backward/Adam optimizer step".to_string(),
         memory_usage,
@@ -214,6 +223,14 @@ pub fn benchmark_backend<B: Backend>(
     )?;
     append_standard_benchmark_outputs(config, &summary)?;
     Ok(summary)
+}
+
+fn max_sigmoid(logits: &[Vec<f32>]) -> f32 {
+    logits
+        .iter()
+        .flat_map(|values| values.iter().copied())
+        .map(crate::model::sigmoid)
+        .fold(0.0_f32, f32::max)
 }
 
 fn append_standard_benchmark_outputs(
