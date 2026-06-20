@@ -1,0 +1,1 @@
+{"image":"data/validation_samples/images/video0001_f00000000.jpg","source":"data\\video0005.mp4","frame_id":"0","width":1920,"height":1080,"pred_boxes":[{"x1":0.0,"y1":0.0,"x2":1920.0,"y2":1080.0}],"gt_boxes":[],"iou":[0.0],"reason":"false_positive"}
