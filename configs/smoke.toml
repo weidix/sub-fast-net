@@ -2,7 +2,6 @@ experiment_name = "subfastnet_smoke"
 output_dir = "outputs/subfastnet_smoke"
 seed = 42
 backend = "cpu"
-mixed_precision = "off"
 
 train_roots = ["data/generated_samples1"]
 val_root = "data/validation_samples"

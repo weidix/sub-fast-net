@@ -52,28 +52,23 @@ When stdout is not a terminal, Burn's TUI renderer cannot take over the alternat
 
 `drop_image` records from `label_masks.json` are skipped during training. Non-strict dataset mode records them as ignored samples; strict mode errors at sample load time. `ignore_region`, `unreliable`, and `exclude_from_loss` continue to become `training_mask = 0` regions.
 
-## CUDA Mixed Precision
+## CUDA Precision
 
-`mixed_precision` is an opt-in CUDA training setting:
+CUDA training uses the FP32 Burn backend:
 
 ```toml
 backend = "cuda"
-mixed_precision = "off"  # "off" | "bf16" | "fp16"
 ```
 
-The default is `"off"`, which keeps the existing `Cuda<f32, i32>` training path. `"bf16"` uses `Cuda<bf16, i32>` for model forward/backward. `"fp16"` uses `Cuda<f16, i32>` plus dynamic loss scaling.
+The former `mixed_precision` config field has been removed. Config files that still contain it are rejected so training cannot accidentally select BF16 or FP16 paths. CPU, CUDA, and WGPU runs all keep FP32 model parameters and optimizer updates.
 
-The loss formula is unchanged. Loss inputs are cast to FP32 before masked BCE, Dice, ratio, and scalar reductions so sigmoid/log/division/reduction and finite checks run in FP32. Target tensor construction and dataloader behavior are unchanged.
-
-FP16 training multiplies `total_loss` by an initial scale of `1024`, unscales gradients before Adam, skips the optimizer step when loss or gradients contain NaN/Inf, halves the scale on overflow, and grows it after sustained finite steps. BF16 uses the same finite loss guard without loss scaling.
-
-Burn 0.21's Adam state follows the selected backend precision; this project does not currently add a separate FP32 master-weight optimizer wrapper. Checkpoints are still recorded with Burn's full-precision recorder.
+The loss formula is unchanged. Loss inputs are cast to FP32 before masked BCE, Dice, ratio, and scalar reductions. Target tensor construction and dataloader behavior are unchanged.
 
 Smoke check:
 
 ```powershell
 cargo check --features backend-cuda
-cargo test mixed_precision_defaults_to_off_and_requires_cuda --features backend-cuda
+cargo test mixed_precision_config_field_is_rejected
 ```
 
-Runtime NaN/Inf validation is visible through `mixed_precision_skip_update` console lines and `metrics.jsonl`: `total_loss` should stay finite. For profiling, compare warm averages in `training_profile_summary.json`, especially `forward_*_time`, `loss_compute_*_time`, `backward_*_time`, `optimizer_step_*_time`, and `batch_time`; ignore the cold first step.
+Runtime NaN/Inf validation is visible through `skip_update` console lines and `metrics.jsonl`: `total_loss` should stay finite. For profiling, compare warm averages in `training_profile_summary.json`, especially `forward_*_time`, `loss_compute_*_time`, `backward_*_time`, `optimizer_step_*_time`, and `batch_time`; ignore the cold first step.

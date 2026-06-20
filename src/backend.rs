@@ -18,14 +18,6 @@ pub type CpuAutodiffBackend = Autodiff<CpuBackend>;
 pub type CudaBackend = burn::backend::Cuda<f32, i32>;
 #[cfg(feature = "backend-cuda")]
 pub type CudaAutodiffBackend = Autodiff<CudaBackend>;
-#[cfg(feature = "backend-cuda")]
-pub type CudaBf16Backend = burn::backend::Cuda<burn::tensor::bf16, i32>;
-#[cfg(feature = "backend-cuda")]
-pub type CudaBf16AutodiffBackend = Autodiff<CudaBf16Backend>;
-#[cfg(feature = "backend-cuda")]
-pub type CudaFp16Backend = burn::backend::Cuda<burn::tensor::f16, i32>;
-#[cfg(feature = "backend-cuda")]
-pub type CudaFp16AutodiffBackend = Autodiff<CudaFp16Backend>;
 
 #[cfg(feature = "backend-wgpu")]
 pub type WgpuBackend = burn::backend::Wgpu<f32, i32>;
@@ -97,17 +89,7 @@ fn validate_backend<B: burn::tensor::backend::Backend>(
 
 #[cfg(feature = "backend-cuda")]
 fn train_cuda(config: &TrainConfig) -> Result<TrainingSummary> {
-    match config.mixed_precision {
-        crate::config::MixedPrecision::Off => {
-            crate::train::train_backend::<CudaAutodiffBackend>(config)
-        }
-        crate::config::MixedPrecision::Bf16 => {
-            crate::train::train_backend::<CudaBf16AutodiffBackend>(config)
-        }
-        crate::config::MixedPrecision::Fp16 => {
-            crate::train::train_backend::<CudaFp16AutodiffBackend>(config)
-        }
-    }
+    crate::train::train_backend::<CudaAutodiffBackend>(config)
 }
 
 #[cfg(not(feature = "backend-cuda"))]
