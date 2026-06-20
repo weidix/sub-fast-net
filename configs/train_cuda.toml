@@ -39,4 +39,4 @@ min_kernel_height = 3
 augment_enabled = true
 strict_dataset = false
 tui_enabled = true
-resume = ""
+resume = "outputs/subfastnet_tiny_cuda_fp32/best"
