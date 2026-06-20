@@ -557,7 +557,7 @@ pub fn train_backend<B: burn::tensor::backend::AutodiffBackend>(
                         scheduler_epoch: epoch,
                     },
                 )?;
-                println!("checkpoint=best epoch={epoch} step={step}");
+                print_checkpoint_status(config, "best", epoch, step, tui.is_active());
             }
         }
         if epoch % config.checkpoint_interval.max(1) == 0 {
@@ -576,7 +576,7 @@ pub fn train_backend<B: burn::tensor::backend::AutodiffBackend>(
                     scheduler_epoch: epoch,
                 },
             )?;
-            println!("checkpoint=periodic epoch={epoch} step={step}");
+            print_checkpoint_status(config, "periodic", epoch, step, tui.is_active());
         }
     }
     sync_training_device::<B>(&device, "before final checkpoint")?;
@@ -994,6 +994,18 @@ fn print_validation_status(
             validation.latency_p95,
             validation.postprocess_latency
         );
+    }
+}
+
+fn print_checkpoint_status(
+    config: &TrainConfig,
+    checkpoint: &str,
+    epoch: usize,
+    step: usize,
+    tui_active: bool,
+) {
+    if !config.tui_enabled || !tui_active {
+        println!("checkpoint={checkpoint} epoch={epoch} step={step}");
     }
 }
 
