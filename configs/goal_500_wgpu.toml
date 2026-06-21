@@ -38,7 +38,7 @@ iou_threshold = 0.5
 pooling_size = 9
 shrink_kernel_scale = 0.1
 min_kernel_width = 3
-min_kernel_height = 3
+min_kernel_height = 55
 
 scale_min = 1.0
 scale_max = 1.0
