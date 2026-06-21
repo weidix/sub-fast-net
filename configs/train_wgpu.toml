@@ -1,5 +1,5 @@
-experiment_name = "subfastnet_tiny_clean_labels"
-output_dir = "outputs/subfastnet_tiny_wgpu_clean_labels"
+experiment_name = "subfastnet_tiny"
+output_dir = "outputs/subfastnet_tiny_wgpu"
 seed = 42
 backend = "wgpu"
 
@@ -41,4 +41,4 @@ min_kernel_height = 3
 augment_enabled = true
 strict_dataset = false
 tui_enabled = true
-resume = ""
+resume = "outputs/subfastnet_tiny_wgpu/checkpoints/epoch_0009"
