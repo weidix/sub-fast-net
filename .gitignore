@@ -14,6 +14,7 @@ vendor/
 tmp/
 temp/
 out/
+outputs/
 
 # Tooling caches
 .venv/
