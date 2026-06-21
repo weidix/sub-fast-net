@@ -543,6 +543,15 @@ where
                 let timed_start = Instant::now();
                 writeln!(metrics_file, "{}", serde_json::to_string(&metrics)?)?;
                 profile.metrics_write_time = timed_start.elapsed().as_secs_f32();
+            } else {
+                tui.update_train_progress(
+                    epoch,
+                    step,
+                    prepared.epoch_batch,
+                    epoch_batches,
+                    prepared.samples_processed,
+                    prepared.samples_total,
+                );
             }
             profile.batch_wall_time = batch_time;
             profile.batch_time = batch_time;

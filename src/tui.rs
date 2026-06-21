@@ -145,6 +145,38 @@ impl BurnTui {
         renderer.render_train(progress, train_progress_indicators(metrics, self.epochs));
     }
 
+    pub fn update_train_progress(
+        &mut self,
+        epoch: usize,
+        step: usize,
+        epoch_batch: usize,
+        epoch_batches: usize,
+        epoch_samples_processed: usize,
+        epoch_samples_total: usize,
+    ) {
+        let Some(renderer) = self.renderer.as_mut() else {
+            return;
+        };
+        renderer.render_train(
+            train_progress_from_values(
+                epoch,
+                step,
+                epoch_samples_processed,
+                epoch_samples_total,
+                self.epochs,
+            ),
+            train_progress_indicators_from_values(
+                epoch,
+                step,
+                epoch_batch,
+                epoch_batches,
+                epoch_samples_processed,
+                epoch_samples_total,
+                self.epochs,
+            ),
+        );
+    }
+
     pub fn update_valid(&mut self, epoch: usize, step: usize, validation: &ValidationSummary) {
         let memory_usage_gb = self.memory_usage_gb(step);
         let Some(renderer) = self.renderer.as_mut() else {
@@ -323,17 +355,13 @@ fn metric_state(
 }
 
 fn train_progress(metrics: &TrainStepMetrics, epochs: usize) -> TrainingProgress {
-    TrainingProgress {
-        progress: Some(Progress {
-            items_processed: metrics.epoch_samples_processed,
-            items_total: metrics.epoch_samples_total.max(1),
-        }),
-        global_progress: Progress {
-            items_processed: metrics.epoch,
-            items_total: epochs,
-        },
-        iteration: Some(metrics.step),
-    }
+    train_progress_from_values(
+        metrics.epoch,
+        metrics.step,
+        metrics.epoch_samples_processed,
+        metrics.epoch_samples_total,
+        epochs,
+    )
 }
 
 fn valid_progress(epoch: usize, step: usize, epochs: usize) -> TrainingProgress {
@@ -351,30 +379,70 @@ fn valid_progress(epoch: usize, step: usize, epochs: usize) -> TrainingProgress 
 }
 
 fn train_progress_indicators(metrics: &TrainStepMetrics, epochs: usize) -> Vec<ProgressType> {
+    train_progress_indicators_from_values(
+        metrics.epoch,
+        metrics.step,
+        metrics.epoch_batch,
+        metrics.epoch_batches,
+        metrics.epoch_samples_processed,
+        metrics.epoch_samples_total,
+        epochs,
+    )
+}
+
+fn train_progress_from_values(
+    epoch: usize,
+    step: usize,
+    epoch_samples_processed: usize,
+    epoch_samples_total: usize,
+    epochs: usize,
+) -> TrainingProgress {
+    TrainingProgress {
+        progress: Some(Progress {
+            items_processed: epoch_samples_processed,
+            items_total: epoch_samples_total.max(1),
+        }),
+        global_progress: Progress {
+            items_processed: epoch,
+            items_total: epochs,
+        },
+        iteration: Some(step),
+    }
+}
+
+fn train_progress_indicators_from_values(
+    epoch: usize,
+    step: usize,
+    epoch_batch: usize,
+    epoch_batches: usize,
+    epoch_samples_processed: usize,
+    epoch_samples_total: usize,
+    epochs: usize,
+) -> Vec<ProgressType> {
     vec![
         ProgressType::Detailed {
             tag: "Epoch".to_string(),
             progress: Progress {
-                items_processed: metrics.epoch,
+                items_processed: epoch,
                 items_total: epochs,
             },
         },
         ProgressType::Value {
             tag: "Iteration".to_string(),
-            value: metrics.step,
+            value: step,
         },
         ProgressType::Detailed {
             tag: "Batch".to_string(),
             progress: Progress {
-                items_processed: metrics.epoch_batch,
-                items_total: metrics.epoch_batches.max(1),
+                items_processed: epoch_batch,
+                items_total: epoch_batches.max(1),
             },
         },
         ProgressType::Detailed {
             tag: "Samples".to_string(),
             progress: Progress {
-                items_processed: metrics.epoch_samples_processed,
-                items_total: metrics.epoch_samples_total.max(1),
+                items_processed: epoch_samples_processed,
+                items_total: epoch_samples_total.max(1),
             },
         },
     ]
