@@ -59,3 +59,6 @@ strict_dataset = false
 tui_enabled = true
 profiling_enabled = false
 resume = ""
+
+max_train_samples = 12000
+train_empty_sample_ratio = 0.25
