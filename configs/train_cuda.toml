@@ -15,17 +15,19 @@ val_root = "data/validation_samples"
 
 model_variant = "tiny"
 
-input_size = 640
-short_size = 640
+input_size = 256
+short_size = 256
 alignment = 32
 
-batch_size = 16
+batch_size = 32
 epochs = 100
 learning_rate = 0.001
+optimizer = "adam"
+gradient_accumulation_steps = 8
 
 validation_interval = 1
 checkpoint_interval = 1
-log_interval = 50
+log_interval = 1
 
 threshold_region = 0.5
 threshold_kernel = 0.5
@@ -39,4 +41,4 @@ min_kernel_height = 3
 augment_enabled = true
 strict_dataset = false
 tui_enabled = true
-resume = "outputs/subfastnet_tiny_cuda_fp32/best"
+resume = ""
