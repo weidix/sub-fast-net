@@ -58,6 +58,7 @@ pub struct TrainConfig {
     pub resume: String,
     pub max_train_samples: Option<usize>,
     pub max_val_samples: Option<usize>,
+    pub train_empty_sample_ratio: Option<f32>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -164,6 +165,7 @@ impl Default for TrainConfig {
             resume: String::new(),
             max_train_samples: None,
             max_val_samples: None,
+            train_empty_sample_ratio: None,
         }
     }
 }
@@ -218,6 +220,11 @@ impl TrainConfig {
         }
         if self.max_detection_width_ratio <= 0.0 || self.max_detection_width_ratio > 1.0 {
             bail!("max_detection_width_ratio must be in (0, 1]");
+        }
+        if let Some(ratio) = self.train_empty_sample_ratio
+            && !(0.0..=1.0).contains(&ratio)
+        {
+            bail!("train_empty_sample_ratio must be in [0, 1]");
         }
         Ok(())
     }

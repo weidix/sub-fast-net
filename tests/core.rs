@@ -13,11 +13,12 @@ use sub_fast_net::{
     metrics::{bbox_iou, match_detection_metrics},
     model::{ModelOutput, SubFastNet},
     preprocess::{
-        CoordinateSpace, ImageMeta, PixelBox, YoloBox, collate_batch_with_config,
-        crop_padding_box_for_test, crop_padding_polygon_for_test, hue_jitter_rgb_for_test,
-        preprocess_sample, random_rotate_box_for_test, random_rotate_polygon_for_test,
-        random_scale_box_for_test, random_scale_polygon_for_test, restore_box_to_original_image,
-        restore_box_to_output_space, scale_aligned_short, yolo_to_pixel,
+        CoordinateSpace, ImageMeta, PixelBox, PreprocessedSample, RectanglePolygon, YoloBox,
+        collate_batch_with_config, crop_padding_box_for_test, crop_padding_polygon_for_test,
+        hue_jitter_rgb_for_test, preprocess_sample, random_rotate_box_for_test,
+        random_rotate_polygon_for_test, random_scale_box_for_test, random_scale_polygon_for_test,
+        restore_box_to_original_image, restore_box_to_output_space, scale_aligned_short,
+        yolo_to_pixel,
     },
     target::{
         TargetConfig, generate_targets, generate_targets_from_polygons,
@@ -444,6 +445,54 @@ fn max_train_samples_keeps_labeled_training_examples() {
 }
 
 #[test]
+fn max_train_samples_can_reserve_empty_training_examples() {
+    let mut config = smoke_test_config("outputs/test_empty_sample_reserve");
+    config.train_roots = vec!["data/generated_samples1".to_string()];
+    config.max_train_samples = Some(20);
+    config.train_empty_sample_ratio = Some(0.25);
+    let dataset = SubtitleDataset::from_train_config(&config).unwrap();
+
+    let empty_count = (0..dataset.len())
+        .map(|index| dataset.load_sample(index).unwrap())
+        .filter(|sample| sample.pixel_boxes_after_label_masks.is_empty())
+        .count();
+
+    assert!(
+        empty_count >= 5,
+        "limited training dataset must reserve configured empty subtitle samples"
+    );
+}
+
+#[test]
+fn max_train_samples_are_spread_across_each_root() {
+    let mut full_config = smoke_test_config("outputs/test_spread_full");
+    full_config.train_roots = vec!["data/generated_samples1".to_string()];
+    full_config.max_train_samples = None;
+    let full_dataset = SubtitleDataset::from_train_config(&full_config).unwrap();
+    let first_twenty_labeled = (0..full_dataset.len())
+        .filter_map(|index| {
+            let sample = full_dataset.load_sample(index).unwrap();
+            (!sample.pixel_boxes_after_label_masks.is_empty()).then_some(sample.sample_id)
+        })
+        .take(20)
+        .collect::<Vec<_>>();
+
+    let mut limited_config = full_config;
+    limited_config.max_train_samples = Some(20);
+    let limited_dataset = SubtitleDataset::from_train_config(&limited_config).unwrap();
+    let limited = limited_dataset
+        .sample_indices()
+        .iter()
+        .map(|sample| sample.sample_id.clone())
+        .collect::<Vec<_>>();
+
+    assert_ne!(
+        limited, first_twenty_labeled,
+        "limited training samples should be spread through each root, not only the sorted prefix"
+    );
+}
+
+#[test]
 fn max_val_samples_keeps_labeled_validation_examples() {
     let mut config = smoke_test_config("outputs/test_labeled_val_limit");
     config.max_val_samples = Some(2);
@@ -541,6 +590,20 @@ fn smoke_train_saves_checkpoint_optimizer_scheduler() {
             .join("errors/false_positive.jsonl")
             .is_file()
     );
+}
+
+#[test]
+fn collate_batch_pads_variable_size_samples_to_common_shape() {
+    let config = smoke_test_config("outputs/test_variable_size_collate");
+    let wide = preprocessed_sample_for_collate("wide", 4, 2, 1.0);
+    let tall = preprocessed_sample_for_collate("tall", 2, 3, 2.0);
+
+    let batch = collate_batch_with_config(vec![wide, tall], &config);
+
+    assert_eq!(batch.width, 4);
+    assert_eq!(batch.height, 3);
+    assert_eq!(batch.imgs[0].len(), 3 * 4 * 3);
+    assert_eq!(batch.imgs[1].len(), 3 * 4 * 3);
 }
 
 #[test]
@@ -1023,6 +1086,39 @@ fn computes_iou_metrics() {
     let metrics = match_detection_metrics(&[a], &[a], 0.5);
     assert_eq!(metrics.false_negative_count, 0);
     assert_eq!(metrics.false_positive_count, 0);
+}
+
+fn preprocessed_sample_for_collate(
+    sample_id: &str,
+    width: usize,
+    height: usize,
+    value: f32,
+) -> PreprocessedSample {
+    PreprocessedSample {
+        image: vec![value; 3 * width * height],
+        channels: 3,
+        width,
+        height,
+        boxes: Vec::new(),
+        rectangle_polygons: Vec::<RectanglePolygon>::new(),
+        ignore_regions: Vec::new(),
+        meta: ImageMeta {
+            image_path: format!("{sample_id}.jpg"),
+            sample_id: sample_id.to_string(),
+            original_width: width as u32,
+            original_height: height as u32,
+            resized_width: width as u32,
+            resized_height: height as u32,
+            scale: 1.0,
+            pad: [0, 0, 0, 0],
+            source: None,
+            frame_id: None,
+            coordinate_space: CoordinateSpace::Image,
+            roi_offset: None,
+            frame_width: None,
+            frame_height: None,
+        },
+    }
 }
 
 fn smoke_test_config(output_dir: &str) -> TrainConfig {

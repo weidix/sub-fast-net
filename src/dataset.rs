@@ -140,7 +140,10 @@ impl SubtitleDataset {
             .collect::<Result<Vec<_>>>()?;
         let mut dataset = Self::from_roots(DatasetSplit::Train, config.strict_dataset, roots)?;
         if let Some(max) = config.max_train_samples {
-            dataset.samples = balanced_sample_limit(&dataset.samples, max);
+            dataset.samples = match config.train_empty_sample_ratio {
+                Some(ratio) => balanced_sample_limit_with_empty_ratio(&dataset.samples, max, ratio),
+                None => balanced_sample_limit(&dataset.samples, max),
+            };
         }
         Ok(dataset)
     }
@@ -386,6 +389,10 @@ fn balanced_sample_limit(samples: &[SampleIndex], max: usize) -> Vec<SampleIndex
             unlabeled.push(sample.clone());
         }
     }
+    for (labeled, unlabeled) in by_root.values_mut() {
+        spread_sample_order(labeled);
+        spread_sample_order(unlabeled);
+    }
     let mut labeled_cursors = BTreeMap::<usize, usize>::new();
     let mut unlabeled_cursors = BTreeMap::<usize, usize>::new();
     let mut limited = Vec::with_capacity(max);
@@ -414,6 +421,93 @@ fn balanced_sample_limit(samples: &[SampleIndex], max: usize) -> Vec<SampleIndex
         }
     }
     limited
+}
+
+fn balanced_sample_limit_with_empty_ratio(
+    samples: &[SampleIndex],
+    max: usize,
+    empty_ratio: f32,
+) -> Vec<SampleIndex> {
+    if max >= samples.len() {
+        return samples.to_vec();
+    }
+    let empty_target = ((max as f32) * empty_ratio).round() as usize;
+    let labeled_target = max.saturating_sub(empty_target);
+    let mut by_root = BTreeMap::<usize, (Vec<SampleIndex>, Vec<SampleIndex>)>::new();
+    for sample in samples {
+        let (labeled, empty) = by_root.entry(sample.root_id).or_default();
+        if sample_has_nonempty_label(sample) {
+            labeled.push(sample.clone());
+        } else {
+            empty.push(sample.clone());
+        }
+    }
+
+    let mut limited = Vec::with_capacity(max);
+    push_balanced_kind(&by_root, &mut limited, labeled_target, true);
+    push_balanced_kind(&by_root, &mut limited, empty_target, false);
+    if limited.len() < max {
+        let remaining = max - limited.len();
+        push_balanced_kind(&by_root, &mut limited, remaining, true);
+    }
+    if limited.len() < max {
+        let remaining = max - limited.len();
+        push_balanced_kind(&by_root, &mut limited, remaining, false);
+    }
+    limited.truncate(max);
+    limited
+}
+
+fn push_balanced_kind(
+    by_root: &BTreeMap<usize, (Vec<SampleIndex>, Vec<SampleIndex>)>,
+    limited: &mut Vec<SampleIndex>,
+    count: usize,
+    labeled: bool,
+) {
+    let initial_len = limited.len();
+    let target_len = initial_len + count;
+    let mut cursors = BTreeMap::<usize, usize>::new();
+    while limited.len() < target_len {
+        let mut pushed = false;
+        for (root_id, (labeled_samples, empty_samples)) in by_root {
+            if limited.len() >= target_len {
+                break;
+            }
+            let root_samples = if labeled {
+                labeled_samples
+            } else {
+                empty_samples
+            };
+            let cursor = cursors.entry(*root_id).or_default();
+            while let Some(sample) = root_samples.get(*cursor) {
+                *cursor += 1;
+                if limited.iter().any(|existing| {
+                    existing.root_id == sample.root_id && existing.sample_id == sample.sample_id
+                }) {
+                    continue;
+                }
+                limited.push(sample.clone());
+                pushed = true;
+                break;
+            }
+        }
+        if !pushed {
+            break;
+        }
+    }
+}
+
+fn spread_sample_order(samples: &mut [SampleIndex]) {
+    samples.sort_by_key(|sample| deterministic_spread_key(sample.root_id, &sample.sample_id));
+}
+
+fn deterministic_spread_key(root_id: usize, sample_id: &str) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64 ^ root_id as u64;
+    for byte in sample_id.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
 }
 
 fn sample_has_nonempty_label(sample: &SampleIndex) -> bool {

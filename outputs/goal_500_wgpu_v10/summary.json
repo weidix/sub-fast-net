@@ -1,0 +1,16 @@
+{
+  "validation": {
+    "f1": 0.9090909361839294,
+    "false_negative_count": 2,
+    "false_positive_count": 4,
+    "fps": 57.05250549316406,
+    "ignored_sample_count": 0,
+    "latency_p50": 34.381038665771484,
+    "latency_p95": 37.3751220703125,
+    "mean_iou": 0.7129011154174805,
+    "postprocess_latency": 0.0631817877292633,
+    "precision": 0.8823529481887817,
+    "recall": 0.9375,
+    "val_loss": 1.3989020586013794
+  }
+}

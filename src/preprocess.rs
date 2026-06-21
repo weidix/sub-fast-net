@@ -489,8 +489,12 @@ pub fn with_original_frame_output(mut meta: ImageMeta) -> ImageMeta {
 }
 
 pub fn collate_batch(samples: Vec<PreprocessedSample>) -> TrainingBatch {
-    let width = samples.first().map_or(0, |sample| sample.width);
-    let height = samples.first().map_or(0, |sample| sample.height);
+    let width = samples.iter().map(|sample| sample.width).max().unwrap_or(0);
+    let height = samples
+        .iter()
+        .map(|sample| sample.height)
+        .max()
+        .unwrap_or(0);
     let mut imgs = Vec::with_capacity(samples.len());
     let mut gt_texts = Vec::with_capacity(samples.len());
     let mut gt_kernels = Vec::with_capacity(samples.len());
@@ -498,18 +502,54 @@ pub fn collate_batch(samples: Vec<PreprocessedSample>) -> TrainingBatch {
     let mut gt_instances = Vec::with_capacity(samples.len());
     let mut gt_boxes = Vec::with_capacity(samples.len());
     let mut img_metas = Vec::with_capacity(samples.len());
-    for sample in samples {
+    for mut sample in samples {
         let targets = crate::target::generate_targets_from_polygons(
             sample.width,
             sample.height,
             &sample.rectangle_polygons,
             &sample.ignore_regions,
         );
-        imgs.push(sample.image);
-        gt_texts.push(targets.gt_text);
-        gt_kernels.push(targets.gt_kernel);
-        training_masks.push(targets.training_mask);
-        gt_instances.push(targets.gt_instance);
+        imgs.push(pad_chw_image(
+            &sample.image,
+            sample.channels,
+            sample.width,
+            sample.height,
+            width,
+            height,
+        ));
+        gt_texts.push(pad_mask(
+            &targets.gt_text,
+            sample.width,
+            sample.height,
+            width,
+            height,
+            0.0,
+        ));
+        gt_kernels.push(pad_mask(
+            &targets.gt_kernel,
+            sample.width,
+            sample.height,
+            width,
+            height,
+            0.0,
+        ));
+        training_masks.push(pad_mask(
+            &targets.training_mask,
+            sample.width,
+            sample.height,
+            width,
+            height,
+            1.0,
+        ));
+        gt_instances.push(pad_instance_mask(
+            &targets.gt_instance,
+            sample.width,
+            sample.height,
+            width,
+            height,
+        ));
+        sample.meta.pad[2] += (width - sample.width) as u32;
+        sample.meta.pad[3] += (height - sample.height) as u32;
         gt_boxes.push(sample.boxes);
         img_metas.push(sample.meta);
     }
@@ -530,8 +570,12 @@ pub fn collate_batch_with_config(
     samples: Vec<PreprocessedSample>,
     config: &TrainConfig,
 ) -> TrainingBatch {
-    let width = samples.first().map_or(0, |sample| sample.width);
-    let height = samples.first().map_or(0, |sample| sample.height);
+    let width = samples.iter().map(|sample| sample.width).max().unwrap_or(0);
+    let height = samples
+        .iter()
+        .map(|sample| sample.height)
+        .max()
+        .unwrap_or(0);
     let mut imgs = Vec::with_capacity(samples.len());
     let mut gt_texts = Vec::with_capacity(samples.len());
     let mut gt_kernels = Vec::with_capacity(samples.len());
@@ -539,7 +583,7 @@ pub fn collate_batch_with_config(
     let mut gt_instances = Vec::with_capacity(samples.len());
     let mut gt_boxes = Vec::with_capacity(samples.len());
     let mut img_metas = Vec::with_capacity(samples.len());
-    for sample in samples {
+    for mut sample in samples {
         let targets = crate::target::generate_targets_from_polygons_with_config(
             sample.width,
             sample.height,
@@ -552,11 +596,47 @@ pub fn collate_batch_with_config(
                 min_kernel_height: config.min_kernel_height,
             },
         );
-        imgs.push(sample.image);
-        gt_texts.push(targets.gt_text);
-        gt_kernels.push(targets.gt_kernel);
-        training_masks.push(targets.training_mask);
-        gt_instances.push(targets.gt_instance);
+        imgs.push(pad_chw_image(
+            &sample.image,
+            sample.channels,
+            sample.width,
+            sample.height,
+            width,
+            height,
+        ));
+        gt_texts.push(pad_mask(
+            &targets.gt_text,
+            sample.width,
+            sample.height,
+            width,
+            height,
+            0.0,
+        ));
+        gt_kernels.push(pad_mask(
+            &targets.gt_kernel,
+            sample.width,
+            sample.height,
+            width,
+            height,
+            0.0,
+        ));
+        training_masks.push(pad_mask(
+            &targets.training_mask,
+            sample.width,
+            sample.height,
+            width,
+            height,
+            1.0,
+        ));
+        gt_instances.push(pad_instance_mask(
+            &targets.gt_instance,
+            sample.width,
+            sample.height,
+            width,
+            height,
+        ));
+        sample.meta.pad[2] += (width - sample.width) as u32;
+        sample.meta.pad[3] += (height - sample.height) as u32;
         gt_boxes.push(sample.boxes);
         img_metas.push(sample.meta);
     }
@@ -571,6 +651,70 @@ pub fn collate_batch_with_config(
         width,
         height,
     }
+}
+
+fn pad_chw_image(
+    image: &[f32],
+    channels: usize,
+    src_w: usize,
+    src_h: usize,
+    dst_w: usize,
+    dst_h: usize,
+) -> Vec<f32> {
+    if src_w == dst_w && src_h == dst_h {
+        return image.to_vec();
+    }
+    let mut padded = vec![0.0; channels * dst_w * dst_h];
+    for channel in 0..channels {
+        for y in 0..src_h {
+            let src_offset = channel * src_w * src_h + y * src_w;
+            let dst_offset = channel * dst_w * dst_h + y * dst_w;
+            padded[dst_offset..dst_offset + src_w]
+                .copy_from_slice(&image[src_offset..src_offset + src_w]);
+        }
+    }
+    padded
+}
+
+fn pad_mask(
+    mask: &[f32],
+    src_w: usize,
+    src_h: usize,
+    dst_w: usize,
+    dst_h: usize,
+    pad_value: f32,
+) -> Vec<f32> {
+    if src_w == dst_w && src_h == dst_h {
+        return mask.to_vec();
+    }
+    let mut padded = vec![pad_value; dst_w * dst_h];
+    for y in 0..src_h {
+        let src_offset = y * src_w;
+        let dst_offset = y * dst_w;
+        padded[dst_offset..dst_offset + src_w]
+            .copy_from_slice(&mask[src_offset..src_offset + src_w]);
+    }
+    padded
+}
+
+fn pad_instance_mask(
+    mask: &[u32],
+    src_w: usize,
+    src_h: usize,
+    dst_w: usize,
+    dst_h: usize,
+) -> Vec<u32> {
+    if src_w == dst_w && src_h == dst_h {
+        return mask.to_vec();
+    }
+    let mut padded = vec![0; dst_w * dst_h];
+    for y in 0..src_h {
+        let src_offset = y * src_w;
+        let dst_offset = y * dst_w;
+        padded[dst_offset..dst_offset + src_w]
+            .copy_from_slice(&mask[src_offset..src_offset + src_w]);
+    }
+    padded
 }
 
 fn preprocess_validation_state(
@@ -591,23 +735,15 @@ fn preprocess_validation_state(
         .to_rgb8();
     let mut canvas = RgbImage::new(target_w, target_h);
     image::imageops::replace(&mut canvas, &resized, 0, 0);
+    let scaled_polygons =
+        scale_clip_polygons(&sample.rectangle_polygons, scale, scale, target_w, target_h);
+    let scaled_ignore_regions =
+        scale_clip_boxes(&sample.ignore_regions, scale, scale, target_w, target_h);
     GeometryState {
         image: canvas,
-        boxes: polygons_to_boxes(&scale_clip_polygons(
-            &sample.rectangle_polygons,
-            scale,
-            scale,
-            target_w,
-            target_h,
-        )),
-        rectangle_polygons: scale_clip_polygons(
-            &sample.rectangle_polygons,
-            scale,
-            scale,
-            target_w,
-            target_h,
-        ),
-        ignore_regions: scale_clip_boxes(&sample.ignore_regions, scale, scale, target_w, target_h),
+        boxes: polygons_to_boxes(&scaled_polygons),
+        rectangle_polygons: scaled_polygons,
+        ignore_regions: scaled_ignore_regions,
         scale,
         pad: [
             0,
