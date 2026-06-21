@@ -69,6 +69,7 @@ pub fn validate_model(
         threshold_kernel: config.threshold_kernel,
         min_width: config.min_kernel_width as f32,
         min_height: config.min_kernel_height as f32,
+        max_width_ratio: config.max_detection_width_ratio,
     };
     for chunk_start in (0..dataset.len()).step_by(config.batch_size.max(1)) {
         let chunk_end = (chunk_start + config.batch_size).min(dataset.len());
@@ -247,6 +248,7 @@ pub fn write_error_reports(
         threshold_kernel: config.threshold_kernel,
         min_width: config.min_kernel_width as f32,
         min_height: config.min_kernel_height as f32,
+        max_width_ratio: config.max_detection_width_ratio,
     };
     for index in 0..dataset.len() {
         let sample = match dataset.load_sample(index) {

@@ -24,13 +24,15 @@ epochs = 100
 learning_rate = 0.001
 optimizer = "adam"
 gradient_accumulation_steps = 8
+scheduler_gamma = 0.97
 
 validation_interval = 1
 checkpoint_interval = 1
 log_interval = 1
 
-threshold_region = 0.5
-threshold_kernel = 0.5
+threshold_region = 0.85
+threshold_kernel = 0.85
+max_detection_width_ratio = 0.5
 iou_threshold = 0.5
 
 pooling_size = 9
@@ -41,4 +43,4 @@ min_kernel_height = 3
 augment_enabled = true
 strict_dataset = false
 tui_enabled = true
-resume = "outputs/subfastnet_tiny_wgpu/checkpoints/epoch_0009"
+resume = ""

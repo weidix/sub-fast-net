@@ -29,6 +29,7 @@ pub struct TrainConfig {
     pub prefetch_batches: usize,
     pub threshold_region: f32,
     pub threshold_kernel: f32,
+    pub max_detection_width_ratio: f32,
     pub iou_threshold: f32,
     pub pooling_size: usize,
     pub shrink_kernel_scale: f32,
@@ -134,6 +135,7 @@ impl Default for TrainConfig {
             prefetch_batches: 2,
             threshold_region: 0.5,
             threshold_kernel: 0.5,
+            max_detection_width_ratio: 1.0,
             iou_threshold: 0.5,
             pooling_size: 9,
             shrink_kernel_scale: 0.1,
@@ -213,6 +215,9 @@ impl TrainConfig {
         if !(0.0..=1.0).contains(&self.flip_prob) || !(0.0..=1.0).contains(&self.gaussian_blur_prob)
         {
             bail!("augmentation probabilities must be in [0, 1]");
+        }
+        if self.max_detection_width_ratio <= 0.0 || self.max_detection_width_ratio > 1.0 {
+            bail!("max_detection_width_ratio must be in (0, 1]");
         }
         Ok(())
     }

@@ -101,6 +101,7 @@ pub fn infer_image_backend_with_roi<B: Backend>(
             threshold_kernel: config.threshold_kernel,
             min_width: config.min_kernel_width as f32,
             min_height: config.min_kernel_height as f32,
+            max_width_ratio: config.max_detection_width_ratio,
         },
     )
     .into_iter()
