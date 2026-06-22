@@ -3,7 +3,7 @@
 最常用：
 
 ```powershell
-python tools/sample_builder/build_samples.py data\xxx.mp4 -o data\generated_samples --boxed-images --filter-region 0,600,1280,720
+python tools/build_samples.py data\xxx.mp4 -o data\generated_samples --boxed-images --filter-region 0,600,1280,720
 ```
 
 参数：
@@ -25,7 +25,7 @@ data\xxx.mp4                 视频文件
 续跑示例：
 
 ```powershell
-python tools/sample_builder/build_samples.py data\xxx.mp4 -o data\generated_samples --start-frame 3000 --boxed-images --filter-region 0,600,1280,720
+python tools/build_samples.py data\xxx.mp4 -o data\generated_samples --start-frame 3000 --boxed-images --filter-region 0,600,1280,720
 ```
 
 说明：
@@ -38,13 +38,13 @@ python tools/sample_builder/build_samples.py data\xxx.mp4 -o data\generated_samp
 切换 PaddleOCR 检测模型示例：
 
 ```powershell
-python tools/sample_builder/build_samples.py data\xxx.mp4 -o data\generated_samples --det-model-name PP-OCRv4_server_det
+python tools/build_samples.py data\xxx.mp4 -o data\generated_samples --det-model-name PP-OCRv4_server_det
 ```
 
 使用 FFmpeg 视频解码后端示例：
 
 ```powershell
-python tools/sample_builder/build_samples.py data\xxx.mp4 -o data\generated_samples --video-backend ffmpeg
+python tools/build_samples.py data\xxx.mp4 -o data\generated_samples --video-backend ffmpeg
 ```
 
 说明：
@@ -67,10 +67,10 @@ VIA 标注转换：
 
 ```powershell
 # labels -> VGG Image Annotator JSON
-python tools/sample_builder/via_labels.py labels-to-via --labels-dir data\generated_samples\labels --images-dir data\generated_samples\images --annotations data\generated_samples\annotations.jsonl -o data\generated_samples\via_annotations.json
+python tools/via_labels.py labels-to-via --labels-dir data\generated_samples\labels --images-dir data\generated_samples\images --annotations data\generated_samples\annotations.jsonl -o data\generated_samples\via_annotations.json
 
 # VGG Image Annotator JSON -> labels
-python tools/sample_builder/via_labels.py via-to-labels data\generated_samples\via_annotations.json --labels-dir data\generated_samples\labels
+python tools/via_labels.py via-to-labels data\generated_samples\via_annotations.json --labels-dir data\generated_samples\labels
 ```
 
 说明：
@@ -91,13 +91,13 @@ tools\filter_region_helper.html
 选框审阅和屏蔽工具：
 
 ```powershell
-python tools/sample_builder/review_generated_labels.py --samples-dir data\generated_samples
+python tools/review_generated_labels.py --samples-dir data\generated_samples
 ```
 
 如果系统没有全局 `python`，使用项目虚拟环境：
 
 ```powershell
-tools\sample_builder\.venv\Scripts\python.exe tools\sample_builder\review_generated_labels.py --samples-dir data\generated_samples
+tools\.venv\Scripts\python.exe tools\review_generated_labels.py --samples-dir data\generated_samples
 ```
 
 参数：
