@@ -1,6 +1,0 @@
-{
-  "epoch": 1,
-  "step": 4,
-  "learning_rate": 0.001,
-  "gamma": 1.0
-}
