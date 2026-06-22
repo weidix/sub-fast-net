@@ -4,8 +4,7 @@ use burn::data::dataloader::Progress;
 use burn::train::{
     Interrupter,
     metric::{
-        CpuMemory, Metric, MetricAttributes, MetricEntry, MetricId, MetricMetadata, Numeric,
-        NumericAttributes, NumericEntry, SerializedEntry,
+        MetricAttributes, MetricEntry, MetricId, NumericAttributes, NumericEntry, SerializedEntry,
     },
     renderer::{
         MetricState, MetricsRenderer, ProgressType, TrainingProgress,
@@ -19,7 +18,6 @@ pub struct BurnTui {
     renderer: Option<Box<dyn MetricsRenderer>>,
     metric_ids: HashMap<&'static str, MetricId>,
     epochs: usize,
-    memory: Option<CpuMemory>,
 }
 
 impl BurnTui {
@@ -29,7 +27,6 @@ impl BurnTui {
                 renderer: None,
                 metric_ids: HashMap::new(),
                 epochs: config.epochs,
-                memory: None,
             };
         }
 
@@ -42,21 +39,10 @@ impl BurnTui {
         for metric in VALID_METRICS {
             register_metric(&mut *renderer, &mut metric_ids, metric, None, true);
         }
-        for metric in TIME_METRICS {
-            register_metric(&mut *renderer, &mut metric_ids, metric, Some("ms"), false);
-        }
-        register_metric(
-            &mut *renderer,
-            &mut metric_ids,
-            "memory_usage_gb",
-            Some("Gb"),
-            false,
-        );
         Self {
             renderer: Some(renderer),
             metric_ids,
             epochs: config.epochs,
-            memory: Some(CpuMemory::new()),
         }
     }
 
@@ -65,81 +51,20 @@ impl BurnTui {
     }
 
     pub fn update_train(&mut self, metrics: &TrainStepMetrics) {
-        let memory_usage_gb = self.memory_usage_gb(metrics.step);
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
         update_train_metric(
             &mut **renderer,
             &self.metric_ids,
-            "total_loss",
+            "loss",
             metrics.total_loss,
         );
         update_train_metric(
             &mut **renderer,
             &self.metric_ids,
-            "region_loss",
-            metrics.region_loss,
-        );
-        update_train_metric(
-            &mut **renderer,
-            &self.metric_ids,
-            "kernel_loss",
-            metrics.kernel_loss,
-        );
-        update_train_metric(
-            &mut **renderer,
-            &self.metric_ids,
-            "bbox_loss",
-            metrics.bbox_loss,
-        );
-        update_train_metric(
-            &mut **renderer,
-            &self.metric_ids,
-            "learning_rate",
-            metrics.learning_rate,
-        );
-        update_train_metric(
-            &mut **renderer,
-            &self.metric_ids,
-            "samples_per_second",
+            "samples/s",
             metrics.samples_per_second,
-        );
-        update_train_metric(
-            &mut **renderer,
-            &self.metric_ids,
-            "batch_time",
-            metrics.batch_time * 1000.0,
-        );
-        update_train_metric(
-            &mut **renderer,
-            &self.metric_ids,
-            "data_time",
-            metrics.data_time * 1000.0,
-        );
-        update_train_metric(
-            &mut **renderer,
-            &self.metric_ids,
-            "positive_region_ratio",
-            metrics.positive_region_ratio,
-        );
-        update_train_metric(
-            &mut **renderer,
-            &self.metric_ids,
-            "positive_kernel_ratio",
-            metrics.positive_kernel_ratio,
-        );
-        update_train_metric(
-            &mut **renderer,
-            &self.metric_ids,
-            "ignored_area_ratio",
-            metrics.ignored_area_ratio,
-        );
-        update_train_metric(
-            &mut **renderer,
-            &self.metric_ids,
-            "memory_usage_gb",
-            memory_usage_gb,
         );
         let progress = train_progress(metrics, self.epochs);
         renderer.render_train(progress, train_progress_indicators(metrics, self.epochs));
@@ -178,16 +103,16 @@ impl BurnTui {
     }
 
     pub fn update_valid(&mut self, epoch: usize, step: usize, validation: &ValidationSummary) {
-        let memory_usage_gb = self.memory_usage_gb(step);
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
         update_valid_metric(
             &mut **renderer,
             &self.metric_ids,
-            "val_loss",
+            "loss",
             validation.val_loss,
         );
+        update_valid_metric(&mut **renderer, &self.metric_ids, "f1", validation.f1);
         update_valid_metric(
             &mut **renderer,
             &self.metric_ids,
@@ -200,37 +125,11 @@ impl BurnTui {
             "recall",
             validation.recall,
         );
-        update_valid_metric(&mut **renderer, &self.metric_ids, "f1", validation.f1);
         update_valid_metric(
             &mut **renderer,
             &self.metric_ids,
             "mean_iou",
             validation.mean_iou,
-        );
-        update_valid_metric(&mut **renderer, &self.metric_ids, "fps", validation.fps);
-        update_valid_metric(
-            &mut **renderer,
-            &self.metric_ids,
-            "latency_p50",
-            validation.latency_p50,
-        );
-        update_valid_metric(
-            &mut **renderer,
-            &self.metric_ids,
-            "latency_p95",
-            validation.latency_p95,
-        );
-        update_valid_metric(
-            &mut **renderer,
-            &self.metric_ids,
-            "postprocess_latency",
-            validation.postprocess_latency,
-        );
-        update_valid_metric(
-            &mut **renderer,
-            &self.metric_ids,
-            "memory_usage_gb",
-            memory_usage_gb,
         );
         renderer.render_valid(
             valid_progress(epoch, step, self.epochs),
@@ -246,10 +145,6 @@ impl BurnTui {
                     tag: "Iteration".to_string(),
                     value: step,
                 },
-                ProgressType::Value {
-                    tag: "Checkpoint".to_string(),
-                    value: step,
-                },
             ],
         );
     }
@@ -259,49 +154,11 @@ impl BurnTui {
             let _ = renderer.on_train_end(None);
         }
     }
-
-    fn memory_usage_gb(&mut self, step: usize) -> f32 {
-        let Some(memory) = self.memory.as_mut() else {
-            return 0.0;
-        };
-        let metadata = MetricMetadata {
-            progress: Progress {
-                items_processed: step,
-                items_total: step.max(1),
-            },
-            global_progress: Progress {
-                items_processed: step,
-                items_total: step.max(1),
-            },
-            iteration: Some(step),
-            lr: None,
-        };
-        memory.update(&(), &metadata);
-        memory.value().current() as f32
-    }
 }
 
-const TRAIN_METRICS: &[&str] = &[
-    "total_loss",
-    "region_loss",
-    "kernel_loss",
-    "bbox_loss",
-    "learning_rate",
-    "samples_per_second",
-    "positive_region_ratio",
-    "positive_kernel_ratio",
-    "ignored_area_ratio",
-];
+const TRAIN_METRICS: &[&str] = &["loss", "samples/s"];
 
-const VALID_METRICS: &[&str] = &["val_loss", "precision", "recall", "f1", "mean_iou", "fps"];
-
-const TIME_METRICS: &[&str] = &[
-    "batch_time",
-    "data_time",
-    "latency_p50",
-    "latency_p95",
-    "postprocess_latency",
-];
+const VALID_METRICS: &[&str] = &["loss", "f1", "precision", "recall", "mean_iou"];
 
 fn register_metric(
     renderer: &mut dyn MetricsRenderer,
@@ -413,10 +270,10 @@ fn train_progress_from_values(
 fn train_progress_indicators_from_values(
     epoch: usize,
     step: usize,
-    epoch_batch: usize,
-    epoch_batches: usize,
-    epoch_samples_processed: usize,
-    epoch_samples_total: usize,
+    _epoch_batch: usize,
+    _epoch_batches: usize,
+    _epoch_samples_processed: usize,
+    _epoch_samples_total: usize,
     epochs: usize,
 ) -> Vec<ProgressType> {
     vec![
@@ -431,19 +288,29 @@ fn train_progress_indicators_from_values(
             tag: "Iteration".to_string(),
             value: step,
         },
-        ProgressType::Detailed {
-            tag: "Batch".to_string(),
-            progress: Progress {
-                items_processed: epoch_batch,
-                items_total: epoch_batches.max(1),
-            },
-        },
-        ProgressType::Detailed {
-            tag: "Samples".to_string(),
-            progress: Progress {
-                items_processed: epoch_samples_processed,
-                items_total: epoch_samples_total.max(1),
-            },
-        },
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tui_metric_budget_prioritizes_validation_visibility() {
+        assert_eq!(TRAIN_METRICS, ["loss", "samples/s"]);
+        assert_eq!(
+            VALID_METRICS,
+            ["loss", "f1", "precision", "recall", "mean_iou"]
+        );
+    }
+
+    #[test]
+    fn train_status_keeps_within_burn_status_panel_height() {
+        let indicators = train_progress_indicators_from_values(1, 2, 3, 4, 6, 8, 10);
+
+        assert!(
+            indicators.len() <= 2,
+            "Burn's status panel is capped at six rows; mode plus two indicators leaves room without clipping"
+        );
+    }
 }

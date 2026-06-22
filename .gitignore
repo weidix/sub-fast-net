@@ -20,3 +20,4 @@ outputs/
 .venv/
 __pycache__/
 .paddlex_cache/
+.envrc

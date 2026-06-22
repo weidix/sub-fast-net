@@ -1,0 +1,42 @@
+experiment_name = "subfastnet_debug_overfit"
+output_dir = "outputs/debug_overfit_final"
+seed = 42
+backend = "cpu"
+
+train_roots = ["data/debug_train_samples"]
+val_root = "data/debug_train_samples"
+model_variant = "tiny"
+
+input_size = 128
+short_size = 128
+alignment = 32
+
+batch_size = 2
+epochs = 37
+learning_rate = 0.003
+
+validation_interval = 1
+checkpoint_interval = 37
+log_interval = 1
+
+threshold_region = 0.5
+threshold_kernel = 0.5
+iou_threshold = 0.5
+
+pooling_size = 9
+shrink_kernel_scale = 0.1
+min_kernel_width = 3
+min_kernel_height = 3
+
+scale_min = 1.0
+scale_max = 1.0
+aspect_min = 1.0
+aspect_max = 1.0
+random_horizontal_flip = false
+random_rotate = false
+gaussian_blur = false
+augment_enabled = false
+strict_dataset = true
+tui_enabled = false
+profiling_enabled = false
+resume = ""

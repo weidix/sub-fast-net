@@ -1,0 +1,64 @@
+experiment_name = "subfastnet_verify_empty_ratio_wgpu"
+output_dir = "outputs/verify_empty_ratio_wgpu"
+seed = 42
+backend = "wgpu"
+
+train_roots = [
+  "data/generated_samples1",
+  "data/generated_samples2",
+  "data/generated_samples3",
+  "data/generated_samples4",
+  "data/mixed_subtitle_samples",
+]
+
+val_root = "data/validation_samples"
+
+model_variant = "tiny"
+
+input_size = 256
+short_size = 256
+alignment = 32
+
+batch_size = 2
+epochs = 37
+learning_rate = 0.003
+optimizer = "adam"
+gradient_accumulation_steps = 1
+scheduler_gamma = 1.0
+
+validation_interval = 1
+checkpoint_interval = 37
+log_interval = 50
+
+threshold_region = 0.84
+threshold_kernel = 0.84
+max_detection_width_ratio = 0.5
+iou_threshold = 0.5
+
+pooling_size = 9
+shrink_kernel_scale = 0.1
+min_kernel_width = 3
+min_kernel_height = 55
+
+scale_min = 1.0
+scale_max = 1.0
+aspect_min = 1.0
+aspect_max = 1.0
+random_horizontal_flip = false
+random_rotate = false
+rotate_angle = 0.0
+brightness = 0.0
+contrast = 0.0
+saturation = 0.0
+hue = 0.0
+gaussian_blur = false
+gaussian_blur_prob = 0.0
+
+augment_enabled = false
+strict_dataset = false
+tui_enabled = false
+profiling_enabled = false
+resume = ""
+
+max_train_samples = 500
+train_empty_sample_ratio = 0.25
