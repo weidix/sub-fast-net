@@ -196,12 +196,8 @@ fn shrink_box_preserving_min_size(
     min_width: u32,
     min_height: u32,
 ) -> PixelBox {
-    let target_width = (bbox.width() * scale)
-        .max(min_width as f32)
-        .min(bbox.width());
-    let target_height = (bbox.height() * scale)
-        .max(min_height as f32)
-        .min(bbox.height());
+    let target_width = shrink_dimension_preserving_minimum(bbox.width(), scale, min_width);
+    let target_height = shrink_dimension_preserving_minimum(bbox.height(), scale, min_height);
     let cx = (bbox.x1 + bbox.x2) * 0.5;
     let cy = (bbox.y1 + bbox.y2) * 0.5;
     PixelBox {
@@ -212,6 +208,14 @@ fn shrink_box_preserving_min_size(
     }
 }
 
+fn shrink_dimension_preserving_minimum(size: f32, scale: f32, minimum: u32) -> f32 {
+    if size <= minimum as f32 {
+        size
+    } else {
+        (size * scale).max(minimum as f32).min(size)
+    }
+}
+
 fn shrink_polygon_preserving_min_size(
     polygon: &RectanglePolygon,
     scale: f32,
@@ -219,7 +223,7 @@ fn shrink_polygon_preserving_min_size(
     min_height: u32,
 ) -> RectanglePolygon {
     let bbox = polygon.bounding_box();
-    if bbox.width() <= min_width as f32 || bbox.height() <= min_height as f32 {
+    if bbox.width() <= min_width as f32 && bbox.height() <= min_height as f32 {
         return polygon.clone();
     }
     let bbox_shrink = shrink_box_preserving_min_size(bbox, scale, min_width, min_height);
@@ -297,4 +301,82 @@ fn point_in_polygon(point: Point, polygon: &[Point]) -> bool {
         prev = *current;
     }
     inside
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        Point, RectanglePolygon, TargetConfig, generate_targets_from_polygons_with_config,
+    };
+    use crate::preprocess::PixelBox;
+
+    #[test]
+    fn kernel_shrinks_wide_subtitle_even_when_height_is_below_minimum() {
+        let polygon = RectanglePolygon {
+            points: vec![
+                Point { x: 10.0, y: 10.0 },
+                Point { x: 90.0, y: 10.0 },
+                Point { x: 90.0, y: 30.0 },
+                Point { x: 10.0, y: 30.0 },
+            ],
+        };
+
+        let targets = generate_targets_from_polygons_with_config(
+            100,
+            40,
+            &[polygon],
+            &[],
+            TargetConfig {
+                pooling_size: 9,
+                shrink_kernel_scale: 0.1,
+                min_kernel_width: 3,
+                min_kernel_height: 55,
+            },
+        );
+
+        let text_pixels = targets.gt_text.iter().filter(|value| **value > 0.0).count();
+        let kernel_pixels = targets
+            .gt_kernel
+            .iter()
+            .filter(|value| **value > 0.0)
+            .count();
+
+        assert!(text_pixels > 0);
+        assert!(
+            kernel_pixels < text_pixels,
+            "kernel should remain horizontally shrunk for subtitle-like boxes"
+        );
+    }
+
+    #[test]
+    fn tiny_boxes_do_not_expand_to_minimum_kernel_size() {
+        let bbox = PixelBox {
+            x1: 10.0,
+            y1: 10.0,
+            x2: 12.0,
+            y2: 12.0,
+        };
+
+        let targets = generate_targets_from_polygons_with_config(
+            32,
+            32,
+            &[bbox.to_polygon()],
+            &[],
+            TargetConfig {
+                pooling_size: 9,
+                shrink_kernel_scale: 0.1,
+                min_kernel_width: 3,
+                min_kernel_height: 55,
+            },
+        );
+
+        let text_pixels = targets.gt_text.iter().filter(|value| **value > 0.0).count();
+        let kernel_pixels = targets
+            .gt_kernel
+            .iter()
+            .filter(|value| **value > 0.0)
+            .count();
+
+        assert_eq!(kernel_pixels, text_pixels);
+    }
 }
