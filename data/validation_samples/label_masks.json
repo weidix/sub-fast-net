@@ -2,23 +2,6 @@
   "version": 1,
   "description": "Manual subtitle label suppression markers. Original label txt files are not modified.",
   "items": {
-    "video0001_f00000960": {
-      "0": {
-        "masked": true,
-        "reason": "manual",
-        "updated_at": 1781541911
-      },
-      "2": {
-        "masked": true,
-        "reason": "manual",
-        "updated_at": 1781541912
-      },
-      "1": {
-        "masked": true,
-        "reason": "manual",
-        "updated_at": 1781541913
-      }
-    },
     "video0001_f00000990": {
       "0": {
         "masked": true,
