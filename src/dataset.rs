@@ -442,19 +442,51 @@ fn balanced_sample_limit_with_empty_ratio(
             empty.push(sample.clone());
         }
     }
+    for (labeled, empty) in by_root.values_mut() {
+        spread_sample_order(labeled);
+        spread_sample_order(empty);
+    }
 
-    let mut limited = Vec::with_capacity(max);
-    push_balanced_kind(&by_root, &mut limited, labeled_target, true);
-    push_balanced_kind(&by_root, &mut limited, empty_target, false);
-    if limited.len() < max {
-        let remaining = max - limited.len();
-        push_balanced_kind(&by_root, &mut limited, remaining, true);
+    let mut labeled = Vec::with_capacity(labeled_target);
+    let mut empty = Vec::with_capacity(empty_target);
+    push_balanced_kind(&by_root, &mut labeled, labeled_target, true);
+    push_balanced_kind(&by_root, &mut empty, empty_target, false);
+    if labeled.len() + empty.len() < max {
+        let remaining = max - labeled.len() - empty.len();
+        push_balanced_kind(&by_root, &mut labeled, remaining, true);
     }
-    if limited.len() < max {
-        let remaining = max - limited.len();
-        push_balanced_kind(&by_root, &mut limited, remaining, false);
+    if labeled.len() + empty.len() < max {
+        let remaining = max - labeled.len() - empty.len();
+        push_balanced_kind(&by_root, &mut empty, remaining, false);
     }
+    let mut limited = interleave_labeled_and_empty(labeled, empty);
     limited.truncate(max);
+    limited
+}
+
+fn interleave_labeled_and_empty(
+    labeled: Vec<SampleIndex>,
+    empty: Vec<SampleIndex>,
+) -> Vec<SampleIndex> {
+    if labeled.is_empty() {
+        return empty;
+    }
+    if empty.is_empty() {
+        return labeled;
+    }
+    let mut limited = Vec::with_capacity(labeled.len() + empty.len());
+    let mut empty_iter = empty.into_iter();
+    let empty_count = empty_iter.len();
+    let gap = (labeled.len() / empty_count.max(1)).max(1);
+    for (index, sample) in labeled.into_iter().enumerate() {
+        limited.push(sample);
+        if (index + 1).is_multiple_of(gap)
+            && let Some(empty_sample) = empty_iter.next()
+        {
+            limited.push(empty_sample);
+        }
+    }
+    limited.extend(empty_iter);
     limited
 }
 

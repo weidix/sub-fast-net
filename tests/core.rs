@@ -464,6 +464,28 @@ fn max_train_samples_can_reserve_empty_training_examples() {
 }
 
 #[test]
+fn train_empty_sample_ratio_does_not_create_empty_only_batches() {
+    let mut config = smoke_test_config("outputs/test_empty_sample_interleave");
+    config.train_roots = vec!["data/generated_samples1".to_string()];
+    config.max_train_samples = Some(20);
+    config.train_empty_sample_ratio = Some(0.25);
+    config.batch_size = 2;
+    let dataset = SubtitleDataset::from_train_config(&config).unwrap();
+
+    for batch_start in (0..dataset.len()).step_by(config.batch_size) {
+        let batch_end = (batch_start + config.batch_size).min(dataset.len());
+        let labeled_count = (batch_start..batch_end)
+            .map(|index| dataset.load_sample(index).unwrap())
+            .filter(|sample| !sample.pixel_boxes_after_label_masks.is_empty())
+            .count();
+        assert!(
+            labeled_count > 0,
+            "empty sample ratio must be interleaved, not concentrated into empty-only batches"
+        );
+    }
+}
+
+#[test]
 fn max_train_samples_are_spread_across_each_root() {
     let mut full_config = smoke_test_config("outputs/test_spread_full");
     full_config.train_roots = vec!["data/generated_samples1".to_string()];
